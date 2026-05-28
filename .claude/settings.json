@@ -3,17 +3,36 @@
     "PreToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
-        "hooks": [{ "type": "command", "command": "bash .claude/scripts/block-bad-java.sh" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/scripts/block-bad-java.sh"
+          }
+        ]
       },
       {
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "bash -c 'INPUT=$(cat); if echo \"$INPUT\" | grep -qiE \"flyway clean|DROP TABLE|DROP DATABASE|rm -rf.*(src|luckledger)\"; then echo \"BLOCKED: Destructive command.\" >&2; exit 2; fi; exit 0'" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'INPUT=$(cat); if echo \"$INPUT\" | grep -qiE \"flyway clean|DROP TABLE|DROP DATABASE|rm -rf.*(src|luckledger)\"; then echo \"BLOCKED: Destructive command.\" >&2; exit 2; fi; exit 0'"
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "bash .claude/scripts/auto-commit-push.sh" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/scripts/auto-commit-push.sh"
+          }
+        ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": true,
+    "context7@claude-plugins-official": true
   }
 }
