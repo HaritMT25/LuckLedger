@@ -17,7 +17,7 @@ isolation: worktree
 effort: medium
 maxTurns: 30
 skills:
-  - api-conventions
+  - api-contract-review
   - spring-boot-conventions
   - scratch-card-domain
 ---

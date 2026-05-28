@@ -20,6 +20,7 @@ skills:
   - spring-boot-conventions
   - jpa-patterns
   - scratch-card-domain
+  - springboot-tdd
 ---
 
 You are a senior Spring Boot 3.5.x / Java 21 engineer building LuckLedger, a gambling awareness scratch card simulator.

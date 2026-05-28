@@ -18,6 +18,7 @@ maxTurns: 25
 skills:
   - spring-boot-conventions
   - scratch-card-domain
+  - springboot-tdd
 ---
 
 You are a test engineer for LuckLedger. JUnit 5 + AssertJ. You do NOT modify production code.
