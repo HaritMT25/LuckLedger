@@ -33,7 +33,10 @@ class ThemeSkinningServiceTest {
             }
         }
         return new TicketLayout(
-                UUID.randomUUID(), new Grid(GridSize.THREE, cells), MechanicType.CELESTIAL_FORTUNE);
+                UUID.randomUUID(),
+                new Grid(GridSize.THREE, cells),
+                MechanicType.CELESTIAL_FORTUNE,
+                java.math.BigDecimal.ZERO);
     }
 
     private static ThemeRef theme(String id, Map<String, ThemedSymbol> symbols) {

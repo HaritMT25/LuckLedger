@@ -88,7 +88,7 @@ public final class GenerationPipeline {
         List<TicketLayout> layouts = new ArrayList<>(outcomes.size());
         for (TicketOutcome outcome : outcomes) {
             Grid grid = populator.populate(gridSize, outcome.prizeAmount().doubleValue(), symbolPool);
-            layouts.add(new TicketLayout(outcome.outcomeId(), grid, mechanicType));
+            layouts.add(new TicketLayout(outcome.outcomeId(), grid, mechanicType, outcome.prizeAmount()));
         }
 
         WinEvaluator evaluator = mechanic.createEvaluator();

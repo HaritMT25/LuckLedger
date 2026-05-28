@@ -8,6 +8,7 @@ import com.luckledger.domain.mechanic.Grid;
 import com.luckledger.domain.mechanic.GridSize;
 import com.luckledger.domain.mechanic.MechanicType;
 import com.luckledger.domain.mechanic.Position;
+import java.math.BigDecimal;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -29,20 +30,29 @@ class TicketLayoutTest {
     @Test
     void holdsItsComponents() {
         Grid grid = grid();
-        TicketLayout layout = new TicketLayout(ID, grid, MechanicType.DEMON_SEAL);
+        TicketLayout layout = new TicketLayout(ID, grid, MechanicType.DEMON_SEAL, new BigDecimal("25"));
 
         assertThat(layout.outcomeId()).isEqualTo(ID);
         assertThat(layout.grid()).isSameAs(grid);
         assertThat(layout.mechanicType()).isEqualTo(MechanicType.DEMON_SEAL);
+        assertThat(layout.prizeAmount()).isEqualByComparingTo("25");
     }
 
     @Test
     void nullComponentsAreRejected() {
-        assertThatThrownBy(() -> new TicketLayout(null, grid(), MechanicType.DEMON_SEAL))
+        assertThatThrownBy(() -> new TicketLayout(null, grid(), MechanicType.DEMON_SEAL, BigDecimal.ZERO))
                 .isInstanceOf(NullPointerException.class);
-        assertThatThrownBy(() -> new TicketLayout(ID, null, MechanicType.DEMON_SEAL))
+        assertThatThrownBy(() -> new TicketLayout(ID, null, MechanicType.DEMON_SEAL, BigDecimal.ZERO))
                 .isInstanceOf(NullPointerException.class);
-        assertThatThrownBy(() -> new TicketLayout(ID, grid(), null))
+        assertThatThrownBy(() -> new TicketLayout(ID, grid(), null, BigDecimal.ZERO))
                 .isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> new TicketLayout(ID, grid(), MechanicType.DEMON_SEAL, null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void negativePrizeIsRejected() {
+        assertThatThrownBy(() -> new TicketLayout(ID, grid(), MechanicType.DEMON_SEAL, new BigDecimal("-1")))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

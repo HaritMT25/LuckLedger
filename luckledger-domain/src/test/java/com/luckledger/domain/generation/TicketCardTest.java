@@ -30,7 +30,8 @@ class TicketCardTest {
                 cells[r][c] = new Cell(new Position(r, c), "X", 0.0);
             }
         }
-        return new TicketLayout(UUID.randomUUID(), new Grid(GridSize.THREE, cells), MechanicType.DEMON_SEAL);
+        return new TicketLayout(
+                UUID.randomUUID(), new Grid(GridSize.THREE, cells), MechanicType.DEMON_SEAL, java.math.BigDecimal.ZERO);
     }
 
     private static ThemedGrid themedGrid() {

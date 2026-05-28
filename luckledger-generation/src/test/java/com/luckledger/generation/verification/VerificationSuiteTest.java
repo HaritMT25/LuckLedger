@@ -38,7 +38,8 @@ class VerificationSuiteTest {
         List<TicketLayout> layouts = new ArrayList<>(prizes.length);
         for (double prize : prizes) {
             Grid grid = populator.populate(GridSize.THREE, prize, FILLER);
-            layouts.add(new TicketLayout(java.util.UUID.randomUUID(), grid, MechanicType.DEMON_SEAL));
+            layouts.add(new TicketLayout(
+                    java.util.UUID.randomUUID(), grid, MechanicType.DEMON_SEAL, BigDecimal.valueOf((long) prize)));
         }
         return layouts;
     }
