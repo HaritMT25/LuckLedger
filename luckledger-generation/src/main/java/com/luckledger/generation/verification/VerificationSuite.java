@@ -34,8 +34,15 @@ public final class VerificationSuite {
 
     /** Number of positional segments the spread check buckets winners into. */
     private static final int SEGMENTS = 4;
-    /** Chi-squared critical value, df = SEGMENTS-1 = 3, alpha = 0.05. */
-    private static final double CHI_SQUARED_CRITICAL = 7.815;
+    /**
+     * Chi-squared rejection threshold for the winner-spread check (df = SEGMENTS-1 = 3). This is a
+     * generation <em>abort</em> gate, not a statistical hypothesis test, so it is set deliberately
+     * high: a fair random shuffle must never trip it (a 5%-level value like {@code 7.815} would
+     * false-abort ~1 in 20 valid pools). At {@code 30.0} the false-positive rate for a uniform
+     * shuffle is ~1e-6, while gross clumping from a missing/broken shuffle (e.g. all winners in one
+     * segment) scores far higher and is still caught.
+     */
+    private static final double CHI_SQUARED_CRITICAL = 30.0;
     /** Chi-squared needs an adequate expected count per bucket to be meaningful. */
     private static final int MIN_EXPECTED_PER_SEGMENT = 5;
     /** Allowed deviation of the realized payout ratio from the pool's target. */

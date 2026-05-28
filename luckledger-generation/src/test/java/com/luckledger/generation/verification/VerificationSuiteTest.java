@@ -113,15 +113,16 @@ class VerificationSuiteTest {
 
     @Test
     void clumpedWinnersFailTheDistributionSpread() {
-        // 20 winners all at the front, then 20 losers — heavily clumped in the first quartile.
-        double[] prizes = new double[40];
+        // A broken/absent shuffle: all 20 winners sit in the first quartile (indices 0..19 of 80),
+        // the rest losers. Chi-squared ~60, well past the gross-clumping threshold.
+        double[] prizes = new double[80];
         java.util.Arrays.fill(prizes, 0, 20, 2.0);
-        java.util.Arrays.fill(prizes, 20, 40, 0.0);
+        java.util.Arrays.fill(prizes, 20, 80, 0.0);
         List<TicketLayout> batch = layouts(prizes);
         PoolContract clumpPool = PoolContract.builder()
-                .totalTickets(40)
+                .totalTickets(80)
                 .ticketPrice(new BigDecimal("5"))
-                .payoutRatio(new BigDecimal("0.20"))
+                .payoutRatio(new BigDecimal("0.10"))
                 .addPrizeTier(new PrizeTier(new BigDecimal("2"), 20, "Consolation"))
                 .minPayout(BigDecimal.ZERO)
                 .bookProfile(BookProfile.BALANCED)
