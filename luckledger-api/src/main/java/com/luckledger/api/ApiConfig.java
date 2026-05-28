@@ -26,11 +26,20 @@ import com.luckledger.mechanic.DemonSealMechanic;
 import com.luckledger.mechanic.GameMechanic;
 import com.luckledger.domain.pool.PoolValidator;
 import com.luckledger.mechanic.NearMissAnalyzer;
+import com.luckledger.domain.ledger.InevitabilityCurveInsight;
+import com.luckledger.domain.ledger.InsightGenerator;
+import com.luckledger.domain.ledger.LossChasingInsight;
+import com.luckledger.domain.ledger.LossRateInsight;
+import com.luckledger.domain.ledger.LuckyStoreDebunkInsight;
+import com.luckledger.domain.ledger.NearMissInsight;
+import com.luckledger.domain.ledger.VarianceExplanationInsight;
 import com.luckledger.player.bank.BankService;
+import com.luckledger.player.ledger.LedgerService;
 import com.luckledger.player.ledger.TransactionRecorder;
 import com.luckledger.scratchflow.ScratchRevealService;
 import com.luckledger.scratchflow.TicketPurchaseService;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -108,6 +117,19 @@ public class ApiConfig {
         return Map.of(
                 MechanicType.CELESTIAL_FORTUNE, new ScratchRevealService(CELESTIAL.createEvaluator(), transactionRecorder),
                 MechanicType.DEMON_SEAL, new ScratchRevealService(DEMON.createEvaluator(), transactionRecorder));
+    }
+
+    @Bean
+    public LedgerService ledgerService(TransactionRecorder transactionRecorder) {
+        Clock clock = Clock.systemUTC();
+        List<InsightGenerator> generators = List.of(
+                new LossRateInsight(clock),
+                new LossChasingInsight(clock),
+                new LuckyStoreDebunkInsight(clock),
+                new NearMissInsight(clock),
+                new VarianceExplanationInsight(clock),
+                new InevitabilityCurveInsight(clock));
+        return new LedgerService(transactionRecorder, generators);
     }
 
     @Bean
