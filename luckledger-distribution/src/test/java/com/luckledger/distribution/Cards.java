@@ -55,4 +55,17 @@ final class Cards {
         }
         return list;
     }
+
+    /** A single-ticket book whose {@code getBookValue()} equals {@code value}. */
+    static TicketBook book(double value) {
+        return new TicketBook(UUID.randomUUID(), List.of(card(value)), UUID.randomUUID());
+    }
+
+    static java.util.List<TicketBook> books(double... values) {
+        java.util.List<TicketBook> list = new java.util.ArrayList<>(values.length);
+        for (double v : values) {
+            list.add(book(v));
+        }
+        return list;
+    }
 }
