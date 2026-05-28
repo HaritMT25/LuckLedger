@@ -1,4 +1,22 @@
 
+# Maven
+target/
+*.jar
+*.war
+!**/src/**/*.jar
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Java
+*.class
+
+# IDE
+*.iml
+.idea/
+
+# OS
+.DS_Store
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
