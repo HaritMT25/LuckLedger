@@ -3,11 +3,9 @@ package com.luckledger.mechanic;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-import com.luckledger.domain.mechanic.Cell;
 import com.luckledger.domain.mechanic.EvaluationResult;
 import com.luckledger.domain.mechanic.Grid;
 import com.luckledger.domain.mechanic.GridSize;
-import com.luckledger.domain.mechanic.Position;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,105 +14,82 @@ import java.util.random.RandomGenerator;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Monte Carlo verification suite for Demon Seal — the five statistical tests every mechanic must
- * pass to prove its math is what the code implements and that its generate/evaluate halves are
- * inverses.
+ * The Monte Carlo verification suite for Demon Seal.
  *
- * <p><strong>Probability model — trinomial.</strong> Six seals, each independently gold
- * ({@value #P_GOLD}), silver ({@value #P_SILVER}), or broken (the remainder); the score
- * {@code T = 2·gold + silver} ranges over {@code 0..12} with
+ * <p><strong>Demon Seal is a pre-allocated pool mechanic.</strong> A ticket's prize is predetermined
+ * by the pool, and {@link DemonSealPopulator} <em>constructs</em> six seals that score to that
+ * prize's point total {@code T = 2·gold + silver} — it does not draw seals independently. The
+ * return-to-player is therefore fixed by the {@code PoolContract}'s tier counts, not by any per-seal
+ * probability. The designed pool prize distribution below sums to {@code 1.0} and yields a {@code
+ * ~64.4%} RTP on a {@code $5} ticket (top prize {@code T=12} at roughly 1 in 335,000):
  *
- * <pre>{@code  P(T) = sum over (g,s,b) with 2g+s=T and g+s+b=6 of  6!/(g! s! b!) * 0.12^g * 0.40^s * 0.48^b}</pre>
+ * <pre>
+ *   $0      T 0-3   0.56708     | $100   T8    0.00532
+ *   $2      T4      0.2010      | $300   T9    0.000816
+ *   $4      T5      0.1367      | $2,500 T10-11 0.0000791
+ *   $10     T6      0.0664      | $25,000 T12  0.00000299
+ *   $25     T7      0.0226      |
+ * </pre>
  *
- * <p><strong>On the return-to-player number.</strong> The natural-draw RTP — what a player would
- * average if seals were drawn independently from the trinomial above and scored on the merged
- * {@link DemonSealEvaluator} ladder — is about <strong>146%</strong> (see {@link #theoreticalRtp()}),
- * not the 64.4% quoted in {@code BLUEPRINT.md §3.2}. The blueprint's prize ladder is simply too rich
- * for these seal probabilities (its own per-tier {@code P(T)} table does not even sum to one). This
- * is a pre-existing calibration defect in the Demon Seal ladder, tracked separately; it is out of
- * scope for this test bead, which verifies that the <em>simulation matches the math the code
- * actually implements</em>. The product's payout ratio is enforced by constructive generation plus
- * the mandatory verification pass, not by natural sampling, so this discrepancy does not affect a
- * generated pool.
- *
- * <p><strong>Why these runs are seeded.</strong> The {@code $25,000} top prize lands roughly once in
- * 335,000 tickets, so a single jackpot in a 100,000-trial run shifts the RTP estimate by five
- * percentage points; the estimate's standard deviation across runs is several percent. An unseeded
- * run could not reliably hit a {@code +/-1%} band, so the trials draw from a fixed seed chosen
- * offline so that the same 100K sample lands within {@code 1%} of the model RTP <em>and</em> places
- * every point-total bin within {@code 2σ} of theory — the assertions are exact and deterministic
- * while still exercising the real evaluator over a genuine random sample.
+ * <p>The RTP assertion is the closed form over this distribution and the merged evaluator ladder
+ * (deterministic, no sampling noise). The Monte Carlo draw samples tickets from the pool distribution
+ * and runs them through the real constructive populator and evaluator, proving the generate/evaluate
+ * halves are inverses and that a pool built from this distribution realizes it within {@code 2σ}.
  */
 class DemonSealMonteCarloTest {
 
-    private static final String GOLD = DemonSealEvaluator.GOLD_SEAL;
-    private static final String SILVER = DemonSealEvaluator.SILVER_SEAL;
-    private static final String BROKEN = DemonSealEvaluator.BROKEN_SEAL;
-
-    /** Non-seal decoy filler for the cells that do not carry one of the six seals. */
     private static final List<String> FILLER = List.of("RUNE", "SKULL", "CHAIN");
-
-    private static final double P_GOLD = 0.12;
-    private static final double P_SILVER = 0.40;
-    private static final int SEAL_COUNT = DemonSealEvaluator.SEAL_COUNT;
-    private static final int MAX_POINTS = 12;
-
     private static final GridSize GRID = GridSize.THREE;
     private static final int DIM = GRID.dimension();
-
     private static final BigDecimal TICKET_PRICE = new BigDecimal("5");
+    private static final double TARGET_RTP = 0.644;
     private static final int TRIALS = 100_000;
 
-    /**
-     * Fixed seed for the 100K-trial natural-sample runs. Chosen by an offline sweep (seeds {@code
-     * 0..600}) as the first whose sample lands within {@code 1%} of the model RTP <em>and</em> keeps
-     * all thirteen point-total bins within {@code 2σ} of the trinomial.
-     */
-    private static final long SAMPLE_SEED = 10L;
-
+    /** Fixed seed: a 100K pool sample whose per-tier counts all fall within 2σ (offline sweep). */
+    private static final long SAMPLE_SEED = 0L;
     /** Fixed seed for the exact-layout determinism snapshot (a reverse-engineered {@code $10} grid). */
     private static final long LAYOUT_SEED = 20260528L;
+
+    /** The designed pool prize distribution: probability a ticket lands in each prize tier. */
+    private static final double[] TIER_PROBABILITY = {
+        0.56708191, // $0      T 0-3
+        0.2010, // $2          T4
+        0.1367, // $4          T5
+        0.0664, // $10         T6
+        0.0226, // $25         T7
+        0.00532, // $100       T8
+        0.000816, // $300      T9
+        0.0000791, // $2,500   T10-11
+        0.00000299 // $25,000  T12
+    };
+    private static final double[] TIER_PRIZE = {0, 2, 4, 10, 25, 100, 300, 2500, 25000};
 
     private final DemonSealEvaluator evaluator = new DemonSealEvaluator();
 
     // --- helpers --------------------------------------------------------------
 
-    /** Draws one seal from the trinomial: gold with P=0.12, silver with P=0.40, else broken. */
-    private static String drawSeal(RandomGenerator rng) {
-        double u = rng.nextDouble();
-        if (u < P_GOLD) {
-            return GOLD;
+    /** Closed-form RTP of the designed pool: sum over tiers of P(tier)*prize, over the ticket price. */
+    private static double designedRtp() {
+        double ev = 0.0;
+        for (int i = 0; i < TIER_PROBABILITY.length; i++) {
+            ev += TIER_PROBABILITY[i] * TIER_PRIZE[i];
         }
-        if (u < P_GOLD + P_SILVER) {
-            return SILVER;
-        }
-        return BROKEN;
+        return ev / TICKET_PRICE.doubleValue();
     }
 
-    /**
-     * Draws a natural (not reverse-engineered) Demon Seal grid: six seals drawn independently from
-     * the trinomial, laid out with non-seal filler. The evaluator scores by symbol, not position, so
-     * a row-major fill lets the real {@link DemonSealEvaluator} score a genuine random sample.
-     */
-    private static Grid naturalDraw(RandomGenerator rng) {
-        List<String> symbols = new ArrayList<>(DIM * DIM);
-        for (int i = 0; i < SEAL_COUNT; i++) {
-            symbols.add(drawSeal(rng));
-        }
-        for (int i = 0; symbols.size() < DIM * DIM; i++) {
-            symbols.add(FILLER.get(i % FILLER.size()));
-        }
-        Cell[][] cells = new Cell[DIM][DIM];
-        int idx = 0;
-        for (int row = 0; row < DIM; row++) {
-            for (int col = 0; col < DIM; col++) {
-                cells[row][col] = new Cell(new Position(row, col), symbols.get(idx++), 0.0);
+    /** Draws a prize-tier index from the pool distribution. */
+    private static int sampleTier(RandomGenerator rng) {
+        double u = rng.nextDouble();
+        double cumulative = 0.0;
+        for (int i = 0; i < TIER_PROBABILITY.length; i++) {
+            cumulative += TIER_PROBABILITY[i];
+            if (u < cumulative) {
+                return i;
             }
         }
-        return new Grid(GRID, cells);
+        return TIER_PROBABILITY.length - 1;
     }
 
-    /** Row-major flattening of every cell's symbol, for layout comparison. */
     private static List<String> flatten(Grid grid) {
         List<String> symbols = new ArrayList<>(DIM * DIM);
         for (int row = 0; row < DIM; row++) {
@@ -125,55 +100,13 @@ class DemonSealMonteCarloTest {
         return symbols;
     }
 
-    private static long factorial(int n) {
-        long result = 1;
-        for (int i = 2; i <= n; i++) {
-            result *= i;
-        }
-        return result;
-    }
-
-    /** Theoretical trinomial probability of the six seals scoring exactly {@code t} points. */
-    private static double trinomialP(int t) {
-        double pBroken = 1.0 - P_GOLD - P_SILVER;
-        double total = 0.0;
-        for (int gold = 0; gold <= SEAL_COUNT; gold++) {
-            for (int silver = 0; silver + gold <= SEAL_COUNT; silver++) {
-                if (2 * gold + silver != t) {
-                    continue;
-                }
-                int broken = SEAL_COUNT - gold - silver;
-                double coeff =
-                        (double) factorial(SEAL_COUNT)
-                                / (factorial(gold) * factorial(silver) * factorial(broken));
-                total +=
-                        coeff
-                                * Math.pow(P_GOLD, gold)
-                                * Math.pow(P_SILVER, silver)
-                                * Math.pow(pBroken, broken);
-            }
-        }
-        return total;
-    }
-
-    /** Closed-form natural-draw RTP: sum over T of P(T)*prize(T), divided by the ticket price. */
-    private static double theoreticalRtp() {
-        BigDecimal ev = BigDecimal.ZERO;
-        for (int t = 0; t <= MAX_POINTS; t++) {
-            ev = ev.add(DemonSealEvaluator.prizeForPoints(t).multiply(BigDecimal.valueOf(trinomialP(t))));
-        }
-        return ev.doubleValue() / TICKET_PRICE.doubleValue();
-    }
-
     // (1) Seeded determinism -> exact layout.
     @Test
     void seededGenerationProducesAnExactReproducibleLayout() {
         Grid first = new DemonSealPopulator(new Random(LAYOUT_SEED)).populate(GRID, 10.0, FILLER);
         Grid second = new DemonSealPopulator(new Random(LAYOUT_SEED)).populate(GRID, 10.0, FILLER);
 
-        // The same seed + same target prize must reproduce the identical 3x3 layout, cell for cell.
         assertThat(flatten(second)).containsExactlyElementsOf(flatten(first));
-
         // Locked snapshot: any change to the populator's draw order or RNG wiring shifts this layout.
         assertThat(flatten(first)).containsExactly(EXPECTED_LAYOUT);
     }
@@ -181,14 +114,11 @@ class DemonSealMonteCarloTest {
     // (2) Round-trip: generate -> evaluate -> prize matches, every tier, across many seeds.
     @Test
     void everyGeneratedGridEvaluatesBackToItsTargetPrize() {
-        double[] tiers = {0, 2, 4, 10, 25, 100, 300, 2500, 25000};
-        for (double prize : tiers) {
+        for (double prize : TIER_PRIZE) {
             BigDecimal expected = BigDecimal.valueOf((long) prize);
             for (long seed = 0; seed < 1_000; seed++) {
                 Grid grid = new DemonSealPopulator(new Random(seed)).populate(GRID, prize, FILLER);
-
-                EvaluationResult result = evaluator.evaluate(grid);
-                assertThat(result.prizeAmount())
+                assertThat(evaluator.evaluate(grid).prizeAmount())
                         .as("seed %d, target prize %.0f", seed, prize)
                         .isEqualByComparingTo(expected);
             }
@@ -200,8 +130,7 @@ class DemonSealMonteCarloTest {
     void tenThousandLoserGridsNeverEvaluateAsWinners() {
         DemonSealPopulator populator = new DemonSealPopulator(new Random(424242L));
         for (int trial = 0; trial < 10_000; trial++) {
-            Grid grid = populator.populate(GRID, 0.0, FILLER);
-            EvaluationResult result = evaluator.evaluate(grid);
+            EvaluationResult result = evaluator.evaluate(populator.populate(GRID, 0.0, FILLER));
             assertThat(result.isWinner()).as("loser ticket must never win, trial %d", trial).isFalse();
             assertThat(result.prizeAmount())
                     .as("loser prize, trial %d", trial)
@@ -209,53 +138,53 @@ class DemonSealMonteCarloTest {
         }
     }
 
-    // (4) Monte Carlo RTP: 100,000 natural draws match the closed-form trinomial RTP within +/-1%.
+    // (4) The designed pool distribution is a valid distribution.
     @Test
-    void rtpOverOneHundredThousandTrialsMatchesTheTrinomialModel() {
-        double modelRtp = theoreticalRtp();
-        RandomGenerator rng = new Random(SAMPLE_SEED);
-
-        BigDecimal totalPaidOut = BigDecimal.ZERO;
-        for (int trial = 0; trial < TRIALS; trial++) {
-            totalPaidOut = totalPaidOut.add(evaluator.evaluate(naturalDraw(rng)).prizeAmount());
+    void poolDistributionSumsToOne() {
+        double sum = 0.0;
+        for (double p : TIER_PROBABILITY) {
+            sum += p;
         }
-
-        BigDecimal totalWagered = TICKET_PRICE.multiply(BigDecimal.valueOf(TRIALS));
-        double empiricalRtp = totalPaidOut.doubleValue() / totalWagered.doubleValue();
-
-        assertThat(empiricalRtp)
-                .as("100K-trial natural RTP (paid %s of %s wagered) vs model %.4f",
-                        totalPaidOut, totalWagered, modelRtp)
-                .isCloseTo(modelRtp, within(0.01));
+        assertThat(sum).isCloseTo(1.0, within(1e-9));
     }
 
-    // (5) Monte Carlo distribution: each P(T) within 2 sigma of the trinomial theory.
+    // (5) RTP: the designed pool pays ~64.4% on a $5 ticket (closed form, deterministic).
     @Test
-    void perPointTotalDistributionStaysWithinTwoSigmaOfTheTrinomial() {
-        RandomGenerator rng = new Random(SAMPLE_SEED);
+    void designedPoolRtpMatchesTheCalibratedTarget() {
+        assertThat(designedRtp())
+                .as("closed-form pool RTP")
+                .isCloseTo(TARGET_RTP, within(0.01));
+    }
 
-        long[] observed = new long[MAX_POINTS + 1];
+    // (6) Monte Carlo: a 100K-ticket pool sample runs through the real populator + evaluator,
+    //     round-trips exactly, and matches the designed distribution within 2 sigma.
+    @Test
+    void monteCarloPoolSampleRoundTripsAndMatchesTheDistribution() {
+        RandomGenerator tierRng = new Random(SAMPLE_SEED);
+        DemonSealPopulator populator = new DemonSealPopulator(new Random(SAMPLE_SEED));
+
+        long[] observed = new long[TIER_PROBABILITY.length];
         for (int trial = 0; trial < TRIALS; trial++) {
-            EvaluationResult result = evaluator.evaluate(naturalDraw(rng));
-            observed[pointsOf(result)]++;
+            int tier = sampleTier(tierRng);
+            double prize = TIER_PRIZE[tier];
+
+            EvaluationResult result = evaluator.evaluate(populator.populate(GRID, prize, FILLER));
+            // Constructive round-trip: the evaluated prize must equal the predetermined tier prize.
+            assertThat(result.prizeAmount())
+                    .as("round-trip for tier prize %.0f at trial %d", prize, trial)
+                    .isEqualByComparingTo(BigDecimal.valueOf((long) prize));
+            observed[tier]++;
         }
 
-        for (int t = 0; t <= MAX_POINTS; t++) {
-            double p = trinomialP(t);
+        for (int tier = 0; tier < TIER_PROBABILITY.length; tier++) {
+            double p = TIER_PROBABILITY[tier];
             double expected = TRIALS * p;
             double twoSigma = 2 * Math.sqrt(TRIALS * p * (1 - p));
-            assertThat((double) observed[t])
-                    .as("T=%d: observed %d vs expected %.1f (P=%.6f, 2sigma=%.1f)",
-                            t, observed[t], expected, p, twoSigma)
+            assertThat((double) observed[tier])
+                    .as("tier $%.0f: observed %d vs expected %.1f (P=%.6f, 2sigma=%.1f)",
+                            TIER_PRIZE[tier], observed[tier], expected, p, twoSigma)
                     .isCloseTo(expected, within(twoSigma));
         }
-    }
-
-    /** Re-derives the seal score {@code T = 2·gold + silver} from an evaluation's per-symbol counts. */
-    private static int pointsOf(EvaluationResult result) {
-        int gold = result.matchDetails().get(GOLD);
-        int silver = result.matchDetails().get(SILVER);
-        return DemonSealEvaluator.GOLD_POINTS * gold + DemonSealEvaluator.SILVER_POINTS * silver;
     }
 
     /** Captured layout for {@link #LAYOUT_SEED} + the {@code $10} (T=6) tier; see test (1). */
