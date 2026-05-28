@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "LuckLedger",
+  "project_id": "c65d1729-5dc0-4a2c-84fd-1ad9695690e7"
+}

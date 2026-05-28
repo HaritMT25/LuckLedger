@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "bd prime",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "bash .claude/scripts/block-bad-java.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "bash -c 'INPUT=$(cat); if echo \"$INPUT\" | grep -qiE \"flyway clean|DROP TABLE|DROP DATABASE|rm -rf.*(src|luckledger)\"; then echo \"BLOCKED: Destructive command.\" \u003e\u00262; exit 2; fi; exit 0'",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "bd prime",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "bash -c 'if ls luckledger-*/pom.xml \u003e/dev/null 2\u003e\u00261; then mvn -q test -fae 2\u003e\u00261 | tail -30; [ ${PIPESTATUS[0]} -ne 0 ] \u0026\u0026 { echo \"Tests failed. Keep iterating.\" \u003e\u00262; exit 2; }; fi; exit 0'",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
