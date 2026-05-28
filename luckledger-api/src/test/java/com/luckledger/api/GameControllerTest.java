@@ -18,7 +18,7 @@ class GameControllerTest {
     @BeforeEach
     void setUp() {
         GameStore store = new GameStore();
-        gameId = store.register(TestGames.demonGame());
+        gameId = store.register(ApiConfig.demonConfig(), TestGames.demonGame());
         mockMvc = MockMvcBuilders.standaloneSetup(new GameController(store))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

@@ -27,19 +27,19 @@ public class GameController {
 
     @GetMapping
     public List<GameSummary> list() {
-        return gameStore.all().entrySet().stream()
-                .map(entry -> summarize(entry.getKey(), entry.getValue()))
+        return gameStore.games().stream()
+                .map(g -> summarize(g.gameId(), g.setup()))
                 .toList();
     }
 
     @GetMapping("/{gameId}")
     public GameSummary get(@PathVariable UUID gameId) {
-        return summarize(gameId, gameStore.get(gameId));
+        return summarize(gameId, gameStore.game(gameId).setup());
     }
 
     @GetMapping("/{gameId}/verification")
     public VerificationDto verification(@PathVariable UUID gameId) {
-        VerificationReport report = gameStore.get(gameId).generationResult().verificationReport();
+        VerificationReport report = gameStore.game(gameId).setup().generationResult().verificationReport();
         List<CheckDto> checks = report.checks().stream()
                 .map(c -> new CheckDto(c.name(), c.passed(), c.message()))
                 .toList();
@@ -48,7 +48,7 @@ public class GameController {
 
     @GetMapping("/{gameId}/near-misses")
     public NearMissDto nearMisses(@PathVariable UUID gameId) {
-        NearMissReport report = gameStore.get(gameId).generationResult().nearMissReport();
+        NearMissReport report = gameStore.game(gameId).setup().generationResult().nearMissReport();
         return new NearMissDto(
                 report.totalLosers(), report.nearMissCount(), report.nearMissRate(), report.distribution());
     }

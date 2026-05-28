@@ -29,7 +29,7 @@ public class GameSeeder implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        gameStore.register(celestialOrchestrator.setup(ApiConfig.celestialConfig()));
-        gameStore.register(demonOrchestrator.setup(ApiConfig.demonConfig()));
+        gameStore.register(ApiConfig.celestialConfig(), celestialOrchestrator.setup(ApiConfig.celestialConfig()));
+        gameStore.register(ApiConfig.demonConfig(), demonOrchestrator.setup(ApiConfig.demonConfig()));
     }
 }
