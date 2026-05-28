@@ -108,10 +108,23 @@ class NearMissAnalyzerTest {
     }
 
     @Test
-    void demonSealIsNotSupportedByMatchCountAnalysis() {
-        assertThatThrownBy(() -> analyzer.analyze(loser(Map.of("points", 3)), MechanicType.DEMON_SEAL))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("DEMON_SEAL");
+    void demonSealLoserAtThreePointsIsANearMiss() {
+        // 1 gold + 1 silver = 3 points, one short of the 4 needed to win
+        NearMissResult result = analyzer.analyze(
+                loser(Map.of("GOLD", 1, "SILVER", 1, "BROKEN", 4)), MechanicType.DEMON_SEAL);
+
+        assertThat(result.isNearMiss()).isTrue();
+        assertThat(result.distance()).isEqualTo(1);
+    }
+
+    @Test
+    void demonSealLoserFarFromWinningIsNotANearMiss() {
+        // all broken = 0 points, 4 short of a win
+        NearMissResult result = analyzer.analyze(
+                loser(Map.of("GOLD", 0, "SILVER", 0, "BROKEN", 6)), MechanicType.DEMON_SEAL);
+
+        assertThat(result.isNearMiss()).isFalse();
+        assertThat(result.distance()).isEqualTo(4);
     }
 
     @Test

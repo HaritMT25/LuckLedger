@@ -134,17 +134,18 @@ class VerificationSuiteTest {
     }
 
     @Test
-    void analyzeNearMissesCountsLosersAndDegradesForUnsupportedMechanics() {
-        // Demon Seal is point-accumulation; NearMissAnalyzer only handles match-count mechanics, so
-        // losers are counted but no near-miss signal is produced (graceful degradation).
+    void analyzeNearMissesSummarizesDemonSealLosers() {
+        // Demon Seal now has a point-accumulation near-miss analyzer, so every loser is bucketed by
+        // its distance-to-win (points short of 4); near-misses are losers at exactly 3 points.
         List<TicketLayout> batch = layouts(10, 2, 0, 0, 0, 0);
 
         NearMissReport report = suite.analyzeNearMisses(batch, evaluator);
 
         assertThat(report.totalLosers()).isEqualTo(4); // four $0 tickets
-        assertThat(report.nearMissCount()).isZero();
-        assertThat(report.nearMissRate()).isZero();
-        assertThat(report.distribution()).isEmpty();
+        assertThat(report.nearMissCount()).isBetween(0, 4);
+        assertThat(report.nearMissRate()).isBetween(0.0, 1.0);
+        // every loser contributes a distance bucket now (no silent degradation)
+        assertThat(report.distribution().values().stream().mapToInt(Integer::intValue).sum()).isEqualTo(4);
     }
 
     @Test
