@@ -26,6 +26,10 @@ import com.luckledger.mechanic.DemonSealMechanic;
 import com.luckledger.mechanic.GameMechanic;
 import com.luckledger.domain.pool.PoolValidator;
 import com.luckledger.mechanic.NearMissAnalyzer;
+import com.luckledger.player.bank.BankService;
+import com.luckledger.player.ledger.TransactionRecorder;
+import com.luckledger.scratchflow.ScratchRevealService;
+import com.luckledger.scratchflow.TicketPurchaseService;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -80,6 +84,30 @@ public class ApiConfig {
     @Bean
     public VerificationSuite verificationSuite(PoolValidator validator, NearMissAnalyzer analyzer) {
         return new VerificationSuite(validator, analyzer);
+    }
+
+    /** The single append-only ledger shared across bank, purchase, and reveal. */
+    @Bean
+    public TransactionRecorder transactionRecorder() {
+        return new TransactionRecorder();
+    }
+
+    @Bean
+    public BankService bankService(TransactionRecorder transactionRecorder) {
+        return new BankService(transactionRecorder);
+    }
+
+    @Bean
+    public TicketPurchaseService ticketPurchaseService(TransactionRecorder transactionRecorder) {
+        return new TicketPurchaseService(transactionRecorder);
+    }
+
+    /** A reveal service per mechanic (each with its mechanic's evaluator), keyed for routing. */
+    @Bean
+    public Map<MechanicType, ScratchRevealService> revealServices(TransactionRecorder transactionRecorder) {
+        return Map.of(
+                MechanicType.CELESTIAL_FORTUNE, new ScratchRevealService(CELESTIAL.createEvaluator(), transactionRecorder),
+                MechanicType.DEMON_SEAL, new ScratchRevealService(DEMON.createEvaluator(), transactionRecorder));
     }
 
     @Bean
