@@ -50,6 +50,11 @@
             <artifactId>luckledger-scratch-flow</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.luckledger</groupId>
+            <artifactId>luckledger-cli</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
