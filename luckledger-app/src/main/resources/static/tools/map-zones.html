@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LuckLedger — Scratch Zone Mapper</title>
+<style>
+    :root { --bg:#0e0b16; --panel:#1b1530; --panel2:#241c42; --ink:#ece6ff; --muted:#a99fce;
+            --gold:#f3c969; --accent:#8b5cf6; --border:#342a5c; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px "Segoe UI",system-ui,sans-serif; background:var(--bg); color:var(--ink);
+           display:flex; height:100vh; overflow:hidden; }
+    h1 { font-size:1.05rem; margin:0 0 .6rem; }
+    h2 { font-size:.85rem; margin:1rem 0 .4rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+    .side { width:340px; flex:0 0 340px; background:var(--panel); border-right:1px solid var(--border);
+            padding:1rem; overflow:auto; }
+    .stage-wrap { flex:1; display:flex; align-items:center; justify-content:center; overflow:auto; padding:1rem; }
+    .stage { position:relative; line-height:0; box-shadow:0 0 0 1px var(--border); }
+    .stage img { display:block; max-height:88vh; max-width:100%; user-select:none; -webkit-user-drag:none; }
+    .overlay { position:absolute; inset:0; }
+    .zone { position:absolute; border:2px solid var(--accent); background:rgba(139,92,246,.18); cursor:move; }
+    .zone.circle { border-radius:50%; }
+    .zone.noscratch { border-style:dashed; border-color:var(--muted); background:rgba(169,159,206,.10); }
+    .zone.sel { border-color:var(--gold); background:rgba(243,201,105,.22); z-index:5; }
+    .zone .tag { position:absolute; top:-1.1rem; left:0; font-size:10px; color:var(--gold); white-space:nowrap;
+                 background:rgba(14,11,22,.8); padding:0 3px; border-radius:3px; line-height:1.1rem; }
+    .handle { position:absolute; width:14px; height:14px; right:-7px; bottom:-7px; background:var(--gold);
+              border:1px solid #000; border-radius:3px; cursor:nwse-resize; }
+    .zone.circle .handle { right:auto; bottom:auto; left:calc(100% - 5px); top:50%; transform:translateY(-50%); cursor:ew-resize; }
+    .ptdot { position:absolute; width:12px; height:12px; margin:-6px 0 0 -6px; background:var(--gold);
+             border:1px solid #000; border-radius:50%; cursor:move; }
+    .ptline { position:absolute; inset:0; pointer-events:none; }
+    button, select, input[type=text] { font:inherit; }
+    button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:.45rem .7rem;
+             font-weight:600; cursor:pointer; margin:0 .3rem .3rem 0; }
+    button.sec { background:var(--panel2); border:1px solid var(--border); }
+    button.danger { background:#7a2b2b; }
+    button:hover { filter:brightness(1.1); }
+    select, input[type=text] { width:100%; background:var(--panel2); color:var(--ink); border:1px solid var(--border);
+             border-radius:8px; padding:.4rem; margin-bottom:.5rem; }
+    label.row { display:flex; align-items:center; gap:.5rem; margin:.3rem 0; color:var(--muted); }
+    textarea { width:100%; height:200px; background:#0b0913; color:#cfe; border:1px solid var(--border);
+               border-radius:8px; padding:.5rem; font-family:ui-monospace,monospace; font-size:12px; }
+    .hint { color:var(--muted); font-size:.78rem; line-height:1.4; }
+    .pill { display:inline-block; background:var(--panel2); border:1px solid var(--border); border-radius:999px;
+            padding:.1rem .5rem; font-size:11px; color:var(--muted); }
+    .sel-empty { color:var(--muted); font-style:italic; }
+    code { color:var(--gold); }
+</style>
+</head>
+<body>
+<div class="side">
+    <h1>🎟️ Scratch Zone Mapper</h1>
+    <p class="hint">Place scratch zones over a ticket, then export percentage-based JSON for
+        <code>config/scratch-zones.json</code>. Click a preset to load its current zones, or upload your own art.</p>
+
+    <h2>Ticket</h2>
+    <select id="ticket">
+        <option value="CELESTIAL_FORTUNE">Celestial Fortune (preset)</option>
+        <option value="DEMON_SEAL">Demon Seal (preset)</option>
+    </select>
+    <input type="file" id="file" accept="image/*">
+    <p class="hint" id="dims"></p>
+
+    <h2>Add zone</h2>
+    <button id="add-circle">+ Circle</button>
+    <button id="add-rect">+ Rect</button>
+    <p class="hint">Then click on the ticket to drop it. Drag the body to move, the gold handle to resize.</p>
+
+    <h2>Selected</h2>
+    <div id="editor"><p class="sel-empty">Nothing selected.</p></div>
+
+    <h2>Export / Import</h2>
+    <button id="export">Export JSON</button>
+    <button class="sec" id="copy">Copy</button>
+    <button class="sec" id="import">Load from textarea</button>
+    <p class="hint">Export gives the <code>zones</code> array for the selected ticket — paste it into
+        <code>tickets.&lt;MECHANIC&gt;.zones</code>.</p>
+    <textarea id="json" spellcheck="false"></textarea>
+</div>
+
+<div class="stage-wrap">
+    <div class="stage" id="stage">
+        <img id="img" alt="ticket">
+        <div class="overlay" id="overlay"></div>
+    </div>
+</div>
+
+<script>
+const PRESETS = {
+    CELESTIAL_FORTUNE: '../assets/tickets/celestial.png',
+    DEMON_SEAL: '../assets/tickets/demon.png',
+};
+
+const img = document.getElementById('img');
+const overlay = document.getElementById('overlay');
+const stage = document.getElementById('stage');
+const editorEl = document.getElementById('editor');
+const ticketSel = document.getElementById('ticket');
+
+let zones = [];        // [{id,label,shape,scratch, ...frac coords}]
+let selected = null;   // zone object
+let nextAdd = null;    // 'circle' | 'rect' pending a click-to-place
+
+// ---- load config + image ----------------------------------------------------
+async function loadPreset(mechanic) {
+    img.src = PRESETS[mechanic];
+    zones = [];
+    try {
+        const cfg = await fetch('../config/scratch-zones.json').then(r => r.json());
+        const t = cfg.tickets && cfg.tickets[mechanic];
+        if (t) zones = JSON.parse(JSON.stringify(t.zones));
+    } catch (e) { /* no config yet — start blank */ }
+    selected = null;
+    render();
+}
+
+img.addEventListener('load', () => {
+    document.getElementById('dims').textContent =
+        `natural ${img.naturalWidth}×${img.naturalHeight}px · displayed ${Math.round(img.clientWidth)}×${Math.round(img.clientHeight)}px`;
+    render();
+});
+
+ticketSel.onchange = () => loadPreset(ticketSel.value);
+
+document.getElementById('file').onchange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    img.src = URL.createObjectURL(f);
+    zones = []; selected = null; render();
+};
+
+// ---- geometry helpers -------------------------------------------------------
+function W() { return img.clientWidth; }
+function H() { return img.clientHeight; }
+function fracFromEvent(e) {
+    const r = img.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+}
+const clamp = (v) => Math.max(0, Math.min(1, v));
+
+// ---- add zones --------------------------------------------------------------
+document.getElementById('add-circle').onclick = () => { nextAdd = 'circle'; stage.style.cursor = 'crosshair'; };
+document.getElementById('add-rect').onclick = () => { nextAdd = 'rect'; stage.style.cursor = 'crosshair'; };
+
+overlay.addEventListener('pointerdown', (e) => {
+    if (!nextAdd || e.target !== overlay) return;
+    const p = fracFromEvent(e);
+    const n = zones.length + 1;
+    const z = nextAdd === 'circle'
+        ? { id: 'zone-' + n, label: '', shape: 'circle', scratch: true, cx: clamp(p.x), cy: clamp(p.y), r: 0.07 }
+        : { id: 'zone-' + n, label: '', shape: 'rect', scratch: true, x: clamp(p.x - 0.06), y: clamp(p.y - 0.05), w: 0.12, h: 0.10 };
+    zones.push(z); selected = z; nextAdd = null; stage.style.cursor = '';
+    render();
+});
+
+// ---- render -----------------------------------------------------------------
+function render() {
+    overlay.innerHTML = '';
+    for (const z of zones) {
+        if (z.shape === 'path') { renderPath(z); continue; }
+        const el = document.createElement('div');
+        el.className = 'zone ' + z.shape + (z.scratch ? '' : ' noscratch') + (z === selected ? ' sel' : '');
+        if (z.shape === 'circle') {
+            const d = z.r * 2 * W();
+            el.style.left = (z.cx * W() - z.r * W()) + 'px';
+            el.style.top = (z.cy * H() - z.r * W()) + 'px';
+            el.style.width = el.style.height = d + 'px';
+        } else {
+            el.style.left = z.x * W() + 'px';
+            el.style.top = z.y * H() + 'px';
+            el.style.width = z.w * W() + 'px';
+            el.style.height = z.h * H() + 'px';
+        }
+        el.innerHTML = `<span class="tag">${z.id}${z.scratch ? '' : ' (ref)'}</span>`;
+        el.addEventListener('pointerdown', (e) => startMove(e, z, el));
+        const h = document.createElement('div');
+        h.className = 'handle';
+        h.addEventListener('pointerdown', (e) => startResize(e, z));
+        el.appendChild(h);
+        overlay.appendChild(el);
+    }
+    renderEditor();
+}
+
+function renderPath(z) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'ptline');
+    svg.setAttribute('width', W()); svg.setAttribute('height', H());
+    const pts = z.points.map(p => `${p.x * W()},${p.y * H()}`).join(' ');
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', pts);
+    poly.setAttribute('fill', 'none');
+    poly.setAttribute('stroke', z === selected ? '#f3c969' : '#a99fce');
+    poly.setAttribute('stroke-width', '2');
+    poly.setAttribute('stroke-dasharray', '6 4');
+    svg.appendChild(poly);
+    overlay.appendChild(svg);
+    z.points.forEach((p, i) => {
+        const dot = document.createElement('div');
+        dot.className = 'ptdot';
+        dot.style.left = p.x * W() + 'px';
+        dot.style.top = p.y * H() + 'px';
+        dot.addEventListener('pointerdown', (e) => startPoint(e, z, i));
+        overlay.appendChild(dot);
+    });
+}
+
+// ---- drag system ------------------------------------------------------------
+function startMove(e, z, el) {
+    e.stopPropagation(); if (nextAdd) return;
+    selected = z; render();
+    const start = fracFromEvent(e);
+    const orig = z.shape === 'circle' ? { cx: z.cx, cy: z.cy } : { x: z.x, y: z.y };
+    drag(e, (p) => {
+        const dx = p.x - start.x, dy = p.y - start.y;
+        if (z.shape === 'circle') { z.cx = clamp(orig.cx + dx); z.cy = clamp(orig.cy + dy); }
+        else { z.x = clamp(orig.x + dx); z.y = clamp(orig.y + dy); }
+        render();
+    });
+}
+function startResize(e, z) {
+    e.stopPropagation();
+    selected = z; render();
+    drag(e, (p) => {
+        if (z.shape === 'circle') {
+            const dxp = (p.x - z.cx) * W(), dyp = (p.y - z.cy) * H();
+            z.r = Math.max(0.01, Math.hypot(dxp, dyp) / W());
+        } else {
+            z.w = Math.max(0.01, clamp(p.x) - z.x);
+            z.h = Math.max(0.01, clamp(p.y) - z.y);
+        }
+        render();
+    });
+}
+function startPoint(e, z, i) {
+    e.stopPropagation();
+    selected = z; render();
+    drag(e, (p) => { z.points[i] = { x: clamp(p.x), y: clamp(p.y) }; render(); });
+}
+function drag(e, onMove) {
+    e.preventDefault();
+    const move = (ev) => onMove(fracFromEvent(ev));
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+}
+
+// ---- editor panel -----------------------------------------------------------
+function renderEditor() {
+    if (!selected) { editorEl.innerHTML = '<p class="sel-empty">Nothing selected.</p>'; return; }
+    const z = selected;
+    const coords = z.shape === 'circle'
+        ? `cx ${z.cx.toFixed(3)} · cy ${z.cy.toFixed(3)} · r ${z.r.toFixed(3)}`
+        : z.shape === 'rect'
+            ? `x ${z.x.toFixed(3)} · y ${z.y.toFixed(3)} · w ${z.w.toFixed(3)} · h ${z.h.toFixed(3)}`
+            : `${z.points.length} points`;
+    editorEl.innerHTML = `
+        <input type="text" id="ed-id" value="${z.id}" placeholder="id">
+        <input type="text" id="ed-label" value="${z.label || ''}" placeholder="label (optional)">
+        <label class="row"><input type="checkbox" id="ed-scratch" ${z.scratch ? 'checked' : ''}> scratchable</label>
+        <p><span class="pill">${z.shape}</span> <span class="pill">${coords}</span></p>
+        <button class="danger" id="ed-del">Delete</button>`;
+    document.getElementById('ed-id').oninput = (e) => { z.id = e.target.value; renderTagsOnly(); };
+    document.getElementById('ed-label').oninput = (e) => { z.label = e.target.value; };
+    document.getElementById('ed-scratch').onchange = (e) => { z.scratch = e.target.checked; render(); };
+    document.getElementById('ed-del').onclick = () => { zones = zones.filter(x => x !== z); selected = null; render(); };
+}
+function renderTagsOnly() { render(); } // ids show in tags; simplest is a full re-render
+
+// ---- export / import --------------------------------------------------------
+function round(z) {
+    const r = (v) => Math.round(v * 1000) / 1000;
+    const o = { id: z.id, label: z.label || '', shape: z.shape, scratch: !!z.scratch };
+    if (z.shape === 'circle') Object.assign(o, { cx: r(z.cx), cy: r(z.cy), r: r(z.r) });
+    else if (z.shape === 'rect') Object.assign(o, { x: r(z.x), y: r(z.y), w: r(z.w), h: r(z.h) });
+    else o.points = z.points.map(p => ({ x: r(p.x), y: r(p.y) }));
+    return o;
+}
+document.getElementById('export').onclick = () => {
+    document.getElementById('json').value = JSON.stringify(zones.map(round), null, 2);
+};
+document.getElementById('copy').onclick = async () => {
+    const ta = document.getElementById('json');
+    if (!ta.value) ta.value = JSON.stringify(zones.map(round), null, 2);
+    try { await navigator.clipboard.writeText(ta.value); } catch (e) { ta.select(); document.execCommand('copy'); }
+};
+document.getElementById('import').onclick = () => {
+    try {
+        const parsed = JSON.parse(document.getElementById('json').value);
+        zones = Array.isArray(parsed) ? parsed : (parsed.zones || []);
+        selected = null; render();
+    } catch (e) { alert('Invalid JSON: ' + e.message); }
+};
+
+window.addEventListener('resize', render);
+loadPreset('CELESTIAL_FORTUNE');
+</script>
+</body>
+</html>

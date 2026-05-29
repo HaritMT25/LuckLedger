@@ -1,59 +1,93 @@
-/* Canvas scratch surface. The ticket art lives in a sibling <img> *behind* the canvas (see
- * renderScratch in app.js); this canvas holds only an opaque metallic coating. Pointer events erase
- * the coating with `globalCompositeOperation = 'destination-out'`, so the art shows through wherever
- * the player scratches. Once enough coating is gone it fires `onReveal` exactly once (the caller then
- * hits the reveal API). Erasing uses a wide round-capped brush with line interpolation between pointer
- * events, so a drag clears a continuous swathe rather than disconnected dots. */
+/* Canvas scratch surface. The ticket art lives in a sibling <img> behind the canvas (see renderScratch
+ * in app.js); this canvas paints a metallic coating ONLY over the configured scratch zones (the coin
+ * circles, crystal cells, seals, …), leaving the rest of the ticket art fully visible. Pointer events
+ * erase the coating with `globalCompositeOperation = 'destination-out'`, revealing the symbol beneath.
+ * Once enough of the coated area is cleared it fires `onReveal` once (the caller then hits the reveal
+ * API). Erasing uses a wide round-capped brush with line interpolation, so a drag clears a swathe. */
 
 class ScratchCard {
-    constructor(canvas, onReveal) {
+    /**
+     * @param canvas  the overlay canvas (its width/height set the working resolution)
+     * @param zones   scratch zones in image fractions: {shape:'circle',cx,cy,r} | {shape:'rect',x,y,w,h}
+     * @param onReveal called once when enough coating is cleared
+     */
+    constructor(canvas, zones, onReveal) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d', { willReadFrequently: true });
+        this.zones = (zones && zones.length) ? zones : [{ shape: 'rect', x: 0, y: 0, w: 1, h: 1 }];
         this.onReveal = onReveal;
         this.revealed = false;
         this.scratching = false;
-        this.threshold = 0.5; // fraction of coating cleared before auto-reveal
-        this.brush = 46;       // erase brush width in canvas px
+        this.threshold = 0.5;  // fraction of the COATED area cleared before auto-reveal
+        this.brush = 38;
         this.W = canvas.width;
         this.H = canvas.height;
-        this.last = null;      // previous pointer position, for line interpolation
+        this.last = null;
+        this.initialCoated = 1;
 
         this._coat();
         this._bind();
     }
 
-    /** Lays down the metallic silver coating that hides the art beneath. */
+    /** Paints the metallic coating over each scratch zone; everything else stays transparent. */
     _coat() {
         const { ctx, W, H } = this;
         ctx.globalCompositeOperation = 'source-over';
+        ctx.clearRect(0, 0, W, H);
+        for (const z of this.zones) this._paintZone(z);
+        this.initialCoated = Math.max(1, this._coatedCount());
+    }
 
-        // brushed-metal base gradient
-        const g = ctx.createLinearGradient(0, 0, W, H);
-        g.addColorStop(0.0, '#b7b8c2');
-        g.addColorStop(0.25, '#e9eaf0');
-        g.addColorStop(0.5, '#9c9da9');
-        g.addColorStop(0.75, '#d2d3db');
-        g.addColorStop(1.0, '#8a8b96');
+    _paintZone(z) {
+        const { ctx, W, H } = this;
+        const bb = this._bbox(z);
+        ctx.save();
+        ctx.beginPath();
+        if (z.shape === 'circle') {
+            ctx.arc(z.cx * W, z.cy * H, z.r * W, 0, Math.PI * 2);
+        } else {
+            this._roundRect(bb.x, bb.y, bb.w, bb.h, Math.min(bb.w, bb.h) * 0.18);
+        }
+        ctx.clip();
+
+        // brushed-metal fill
+        const g = ctx.createLinearGradient(bb.x, bb.y, bb.x + bb.w, bb.y + bb.h);
+        g.addColorStop(0.0, '#aeb0bb');
+        g.addColorStop(0.3, '#e6e7ee');
+        g.addColorStop(0.55, '#9a9ca8');
+        g.addColorStop(0.8, '#cdced6');
+        g.addColorStop(1.0, '#868792');
         ctx.fillStyle = g;
-        ctx.fillRect(0, 0, W, H);
+        ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
 
-        // faint diagonal streaks for a brushed, metallic sheen
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        // diagonal sheen streaks
+        ctx.strokeStyle = 'rgba(255,255,255,0.07)';
         ctx.lineWidth = 2;
-        for (let x = -H; x < W; x += 7) {
+        for (let x = bb.x - bb.h; x < bb.x + bb.w; x += 6) {
             ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x + H, H);
+            ctx.moveTo(x, bb.y);
+            ctx.lineTo(x + bb.h, bb.y + bb.h);
             ctx.stroke();
         }
+        ctx.restore();
+    }
 
-        // prompt text
-        ctx.fillStyle = 'rgba(40,40,48,.55)';
-        ctx.textAlign = 'center';
-        ctx.font = '700 22px "Segoe UI", system-ui, sans-serif';
-        ctx.fillText('SCRATCH HERE', W / 2, H / 2);
-        ctx.font = '13px "Segoe UI", system-ui, sans-serif';
-        ctx.fillText('drag to reveal your ticket', W / 2, H / 2 + 26);
+    _bbox(z) {
+        const { W, H } = this;
+        if (z.shape === 'circle') {
+            return { x: z.cx * W - z.r * W, y: z.cy * H - z.r * W, w: z.r * 2 * W, h: z.r * 2 * W };
+        }
+        return { x: z.x * W, y: z.y * H, w: z.w * W, h: z.h * H };
+    }
+
+    _roundRect(x, y, w, h, r) {
+        const ctx = this.ctx;
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
     }
 
     _bind() {
@@ -83,16 +117,13 @@ class ScratchCard {
         };
     }
 
-    /** Erases a round dot at the point and, if dragging, a fat line from the previous point to it. */
+    /** Erases a round dot and, if dragging, a fat line from the previous point — coating only. */
     _stroke({ x, y }) {
         const { ctx } = this;
         ctx.globalCompositeOperation = 'destination-out';
-        ctx.fillStyle = 'rgba(0,0,0,1)';
-        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.fillStyle = ctx.strokeStyle = 'rgba(0,0,0,1)';
         ctx.lineWidth = this.brush;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
+        ctx.lineCap = ctx.lineJoin = 'round';
         if (this.last) {
             ctx.beginPath();
             ctx.moveTo(this.last.x, this.last.y);
@@ -102,7 +133,6 @@ class ScratchCard {
         ctx.beginPath();
         ctx.arc(x, y, this.brush / 2, 0, Math.PI * 2);
         ctx.fill();
-
         ctx.globalCompositeOperation = 'source-over';
         this.last = { x, y };
     }
@@ -115,16 +145,17 @@ class ScratchCard {
         }
     }
 
-    /** Fraction of pixels whose coating has been erased (alpha near zero), sampled coarsely. */
+    /** Count of still-coated sampled pixels (alpha above a small threshold). */
+    _coatedCount() {
+        const data = this.ctx.getImageData(0, 0, this.W, this.H).data;
+        let coated = 0;
+        for (let i = 3; i < data.length; i += 40) if (data[i] > 40) coated++;
+        return coated;
+    }
+
+    /** Fraction of the originally-coated area that has been scratched away. */
     _clearedFraction() {
-        const { ctx, W, H } = this;
-        const data = ctx.getImageData(0, 0, W, H).data;
-        let cleared = 0, total = 0;
-        for (let i = 3; i < data.length; i += 40) { // every 10th pixel (4 bytes each)
-            total++;
-            if (data[i] < 40) cleared++;
-        }
-        return total ? cleared / total : 0;
+        return (this.initialCoated - this._coatedCount()) / this.initialCoated;
     }
 
     /** Clears all remaining coating (used once the result is shown). */

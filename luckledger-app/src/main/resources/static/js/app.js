@@ -192,7 +192,16 @@ async function buyTicket(bookId) {
     }
 }
 
-function renderScratch() {
+// Scratch-zone config (coin circles, crystal cells, seals, …), loaded once. See config/scratch-zones.json.
+let _zonesPromise = null;
+function loadScratchZones() {
+    if (!_zonesPromise) {
+        _zonesPromise = fetch('config/scratch-zones.json').then((r) => r.json()).catch(() => null);
+    }
+    return _zonesPromise;
+}
+
+async function renderScratch() {
     const t = state.pendingTicket;
     if (!t) {
         view.innerHTML = `<div class="section-title"><h2>Scratch</h2></div>
@@ -210,11 +219,18 @@ function renderScratch() {
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
-            <p class="scratch-instructions">Drag across the silver coating to reveal the ticket.</p>
+            <p class="scratch-instructions">Scratch the coated symbols to reveal your ticket.</p>
             <button class="btn secondary" id="buy-another" hidden>Buy another</button>
         </div>`;
 
-    const card = new ScratchCard(document.getElementById('scratch'), async () => {
+    // Coat only the scratch zones for this ticket, so the rest of the art stays visible.
+    const cfg = await loadScratchZones();
+    const ticket = cfg && cfg.tickets && cfg.tickets[t.mechanic];
+    const zones = ticket ? ticket.zones.filter((z) => z.scratch && z.shape !== 'path') : [];
+
+    const canvas = document.getElementById('scratch');
+    if (!canvas) return; // navigated away while loading
+    const card = new ScratchCard(canvas, zones, async () => {
         try {
             const outcome = await Api.reveal(t.ticketId, state.player.playerId);
             showResult(outcome);

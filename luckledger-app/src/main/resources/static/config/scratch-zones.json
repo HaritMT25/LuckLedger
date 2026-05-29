@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "_note": "Positions are fractions of image width/height (0..1), so they scale to any size. Circles use cx/cy/r (r is a fraction of WIDTH). Rects use x/y/w/h (top-left + size). 'scratch:true' zones get a metallic coating in the app; others (title/badge/decoration) are reference only. Refine with /tools/map-zones.html.",
+  "tickets": {
+    "CELESTIAL_FORTUNE": {
+      "image": "assets/tickets/celestial.png",
+      "zones": [
+        { "id": "win-1", "label": "Winning coin 1", "shape": "circle", "scratch": true, "cx": 0.197, "cy": 0.335, "r": 0.082 },
+        { "id": "win-2", "label": "Winning coin 2", "shape": "circle", "scratch": true, "cx": 0.398, "cy": 0.335, "r": 0.082 },
+        { "id": "win-3", "label": "Winning coin 3", "shape": "circle", "scratch": true, "cx": 0.602, "cy": 0.335, "r": 0.082 },
+        { "id": "win-4", "label": "Winning coin 4", "shape": "circle", "scratch": true, "cx": 0.803, "cy": 0.335, "r": 0.082 },
+
+        { "id": "num-1",  "label": "Crystal 1",  "shape": "rect", "scratch": true, "x": 0.090, "y": 0.475, "w": 0.150, "h": 0.100 },
+        { "id": "num-2",  "label": "Crystal 2",  "shape": "rect", "scratch": true, "x": 0.313, "y": 0.475, "w": 0.150, "h": 0.100 },
+        { "id": "num-3",  "label": "Crystal 3",  "shape": "rect", "scratch": true, "x": 0.537, "y": 0.475, "w": 0.150, "h": 0.100 },
+        { "id": "num-4",  "label": "Crystal 4",  "shape": "rect", "scratch": true, "x": 0.760, "y": 0.475, "w": 0.150, "h": 0.100 },
+
+        { "id": "num-5",  "label": "Crystal 5",  "shape": "rect", "scratch": true, "x": 0.090, "y": 0.605, "w": 0.150, "h": 0.100 },
+        { "id": "num-6",  "label": "Crystal 6",  "shape": "rect", "scratch": true, "x": 0.313, "y": 0.605, "w": 0.150, "h": 0.100 },
+        { "id": "num-7",  "label": "Crystal 7",  "shape": "rect", "scratch": true, "x": 0.537, "y": 0.605, "w": 0.150, "h": 0.100 },
+        { "id": "num-8",  "label": "Crystal 8",  "shape": "rect", "scratch": true, "x": 0.760, "y": 0.605, "w": 0.150, "h": 0.100 },
+
+        { "id": "num-9",  "label": "Crystal 9",  "shape": "rect", "scratch": true, "x": 0.090, "y": 0.742, "w": 0.150, "h": 0.100 },
+        { "id": "num-10", "label": "Crystal 10", "shape": "rect", "scratch": true, "x": 0.313, "y": 0.742, "w": 0.150, "h": 0.100 },
+        { "id": "num-11", "label": "Crystal 11", "shape": "rect", "scratch": true, "x": 0.537, "y": 0.742, "w": 0.150, "h": 0.100 },
+        { "id": "num-12", "label": "Crystal 12", "shape": "rect", "scratch": true, "x": 0.760, "y": 0.742, "w": 0.150, "h": 0.100 },
+
+        { "id": "title", "label": "Title text", "shape": "rect", "scratch": false, "x": 0.050, "y": 0.085, "w": 0.900, "h": 0.050 },
+        { "id": "badge", "label": "SCRATCH 2 CASH badge", "shape": "rect", "scratch": false, "x": 0.790, "y": 0.905, "w": 0.185, "h": 0.070 }
+      ]
+    },
+    "DEMON_SEAL": {
+      "image": "assets/tickets/demon.png",
+      "zones": [
+        { "id": "seal-top",         "label": "Seal — top",         "shape": "rect", "scratch": true, "x": 0.440, "y": 0.160, "w": 0.120, "h": 0.130 },
+        { "id": "seal-upper-right", "label": "Seal — upper right",  "shape": "rect", "scratch": true, "x": 0.775, "y": 0.305, "w": 0.110, "h": 0.130 },
+        { "id": "seal-lower-right", "label": "Seal — lower right",  "shape": "rect", "scratch": true, "x": 0.775, "y": 0.580, "w": 0.110, "h": 0.130 },
+        { "id": "seal-bottom",      "label": "Seal — bottom",       "shape": "rect", "scratch": true, "x": 0.440, "y": 0.735, "w": 0.120, "h": 0.130 },
+        { "id": "seal-lower-left",  "label": "Seal — lower left",   "shape": "rect", "scratch": true, "x": 0.110, "y": 0.580, "w": 0.110, "h": 0.130 },
+        { "id": "seal-upper-left",  "label": "Seal — upper left",   "shape": "rect", "scratch": true, "x": 0.110, "y": 0.305, "w": 0.110, "h": 0.130 },
+
+        { "id": "demon-center", "label": "Center demon circle", "shape": "circle", "scratch": true, "cx": 0.500, "cy": 0.555, "r": 0.235 },
+
+        { "id": "fire-chain", "label": "Fire chain path (decorative)", "shape": "path", "scratch": false,
+          "points": [
+            { "x": 0.500, "y": 0.225 }, { "x": 0.830, "y": 0.370 }, { "x": 0.830, "y": 0.645 },
+            { "x": 0.500, "y": 0.800 }, { "x": 0.165, "y": 0.645 }, { "x": 0.165, "y": 0.370 }
+          ]
+        }
+      ]
+    }
+  }
+}
