@@ -242,8 +242,9 @@ async function renderScratch() {
         outcome = await Api.ticket(t.ticketId).catch(() => ({ isWinner: false, prizeAmount: 0 }));
     }
 
-    // Draw the hidden numbers on the reveal layer (under the foil).
-    drawHiddenNumbers(reveal, zones, t.mechanic, t.ticketId, outcome);
+    // Draw the real hidden symbols (from the engine grid) on the reveal layer, under the foil.
+    const values = buildRevealValues(zones, t.mechanic, t.ticketId, outcome);
+    drawHiddenNumbers(reveal, zones, values);
 
     const onAllScratched = async () => {
         showResult(outcome);
@@ -262,6 +263,37 @@ function seededRandom(str) {
     let h = 1779033703 ^ str.length;
     for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
     return function () { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+}
+
+const SEAL_DISPLAY = {
+    GOLD: { text: 'GOLD', color: '#f3c969' },
+    SILVER: { text: 'SILVER', color: '#d7dae3' },
+    BROKEN: { text: 'BROKEN', color: '#e0796f' },
+};
+
+/**
+ * The value to reveal under each zone, keyed by zone id → { text, color }. Uses the REAL engine grid
+ * from the reveal response (zones are listed in grid row-major order; for Demon only the 6 seal cells
+ * are used). Falls back to outcome-consistent generated numbers if the grid is unavailable.
+ */
+function buildRevealValues(zones, mechanic, ticketId, outcome) {
+    const grid = outcome && outcome.grid;
+    const out = {};
+    if (grid && grid.length) {
+        const cells = [...grid].sort((a, b) => a.row - b.row || a.col - b.col);
+        if (mechanic === 'DEMON_SEAL') {
+            const seals = cells.filter((c) => SEAL_DISPLAY[c.symbol]);
+            zones.forEach((z, i) => { out[z.id] = seals[i] ? SEAL_DISPLAY[seals[i].symbol] : { text: '?', color: '#f3c969' }; });
+        } else {
+            // Celestial (row-major number game): scratch zone i ↔ grid cell i.
+            zones.forEach((z, i) => { out[z.id] = { text: cells[i] ? cells[i].symbol : '?', color: '#f3c969' }; });
+        }
+        return out;
+    }
+    // Fallback: generated numbers consistent with win/loss (used only if the grid wasn't returned).
+    const fab = numbersForTicket(zones, mechanic, ticketId, outcome);
+    zones.forEach((z) => { out[z.id] = { text: String(fab[z.id]), color: '#f3c969' }; });
+    return out;
 }
 
 /** Numbers for each zone, consistent with the outcome (a winner shows a match; a loser never does). */
@@ -289,17 +321,17 @@ function numbersForTicket(zones, mechanic, ticketId, outcome) {
     return out;
 }
 
-/** Paints each zone's hidden number on a small plaque on the reveal canvas. */
-function drawHiddenNumbers(canvas, zones, mechanic, ticketId, outcome) {
+/** Paints each zone's hidden value (from `values`: id → {text,color}) on a plaque on the reveal canvas. */
+function drawHiddenNumbers(canvas, zones, values) {
     const ctx = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
-    const values = numbersForTicket(zones, mechanic, ticketId, outcome);
     ctx.clearRect(0, 0, W, H);
     for (const z of zones) {
         const bb = z.shape === 'circle'
             ? { x: z.cx * W - z.r * W, y: z.cy * H - z.r * W, w: z.r * 2 * W, h: z.r * 2 * W }
             : { x: z.x * W, y: z.y * H, w: z.w * W, h: z.h * H };
         const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+        const v = values[z.id] || { text: '?', color: '#f3c969' };
 
         ctx.save();
         ctx.beginPath();
@@ -311,10 +343,17 @@ function drawHiddenNumbers(canvas, zones, mechanic, ticketId, outcome) {
         ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(243,201,105,0.55)'; ctx.stroke();
 
-        ctx.fillStyle = '#f3c969';
-        ctx.font = `700 ${Math.round(Math.min(bb.w, bb.h) * 0.5)}px "Segoe UI", system-ui, sans-serif`;
+        // Fit the text to the plaque width.
+        const text = String(v.text);
+        let fs = Math.round(Math.min(bb.w, bb.h) * 0.5);
+        ctx.font = `700 ${fs}px "Segoe UI", system-ui, sans-serif`;
+        while (fs > 7 && ctx.measureText(text).width > bb.w * 0.84) {
+            fs -= 1;
+            ctx.font = `700 ${fs}px "Segoe UI", system-ui, sans-serif`;
+        }
+        ctx.fillStyle = v.color || '#f3c969';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(String(values[z.id] ?? '?'), cx, cy);
+        ctx.fillText(text, cx, cy);
         ctx.restore();
     }
 }
