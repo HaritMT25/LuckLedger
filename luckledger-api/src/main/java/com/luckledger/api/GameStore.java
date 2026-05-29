@@ -54,6 +54,14 @@ public class GameStore {
         return books.findAll().stream().filter(b -> b.getDealerId() != null).toList();
     }
 
+    /** The allocated books a dealer (shop) currently holds, in id order for stable presentation. */
+    public List<TicketBookEntity> booksForDealer(UUID dealerId) {
+        Objects.requireNonNull(dealerId, "dealerId");
+        return books.findByDealerId(dealerId).stream()
+                .sorted(java.util.Comparator.comparing(b -> b.getId().toString()))
+                .toList();
+    }
+
     /** An allocated book by id; a non-existent or unallocated book is treated as not found. */
     public TicketBookEntity book(UUID bookId) {
         Objects.requireNonNull(bookId, "bookId");

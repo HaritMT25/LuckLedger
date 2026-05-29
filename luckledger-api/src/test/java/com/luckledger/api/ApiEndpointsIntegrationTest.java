@@ -85,6 +85,7 @@ class ApiEndpointsIntegrationTest {
 
     private UUID gameId;
     private UUID bookId;
+    private UUID dealerId;
     private UUID firstTicketId;
 
     @BeforeEach
@@ -106,6 +107,7 @@ class ApiEndpointsIntegrationTest {
                 .findFirst()
                 .orElseThrow();
         bookId = allocated.getId();
+        dealerId = allocated.getDealerId();
         firstTicketId = persisted.tickets().stream()
                 .filter(t -> bookId.equals(t.getBookId()) && Integer.valueOf(0).equals(t.getPositionInBook()))
                 .map(TicketEntity::getId)
@@ -160,11 +162,13 @@ class ApiEndpointsIntegrationTest {
     // --- books & dealers -----------------------------------------------------
 
     @Test
-    void listsAndGetsBookMetadataWithoutLeakingTickets() throws Exception {
-        mockMvc.perform(get("/api/books"))
+    void listsAShopsBooksAndGetsOneWithoutLeakingTickets() throws Exception {
+        // Books are reachable only through their shop — there is no flat /api/books catalogue.
+        mockMvc.perform(get("/api/dealers/" + dealerId + "/books"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].totalTickets").isNumber())
-                .andExpect(jsonPath("$[0].ticketsRemaining").isNumber());
+                .andExpect(jsonPath("$[0].ticketsRemaining").isNumber())
+                .andExpect(jsonPath("$[0].gameName").value("Demon Seal"));
 
         mockMvc.perform(get("/api/books/" + bookId))
                 .andExpect(status().isOk())

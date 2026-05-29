@@ -35,6 +35,16 @@ public class DealerController {
         return dto(gameStore.dealer(dealerId), gameNameIndex());
     }
 
+    /** The books a shop stocks — the only way to reach books (there is no flat book catalogue). */
+    @GetMapping("/{dealerId}/books")
+    public List<BookController.BookDto> books(@PathVariable UUID dealerId) {
+        gameStore.dealer(dealerId); // 404 if the shop does not exist
+        Map<UUID, String> gameNames = gameNameIndex();
+        return gameStore.booksForDealer(dealerId).stream()
+                .map(b -> BookController.toDto(b, gameNames.getOrDefault(b.getGameId(), "Unknown game")))
+                .toList();
+    }
+
     private DealerDto dto(DealerEntity dealer, Map<UUID, String> gameNames) {
         List<GameRef> stocked = dealer.getStockedGames().stream()
                 .map(id -> new GameRef(id, gameNames.getOrDefault(id, "Unknown game")))

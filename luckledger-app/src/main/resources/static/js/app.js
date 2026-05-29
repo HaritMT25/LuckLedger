@@ -8,6 +8,7 @@ const TICKET_ART = {
 const state = {
     player: null,            // PlayerDto
     pendingTicket: null,     // { ticketId, mechanic } awaiting scratch
+    lastShop: null,          // dealerId of the shop last browsed (for "Buy another")
 };
 
 const view = document.getElementById('view');
@@ -124,21 +125,19 @@ async function renderDealers() {
 
 /** A single shop's storefront: its books grouped by game, each buyable. */
 async function renderDealerBooks(dealerId) {
+    state.lastShop = dealerId; // so "Buy another" returns to this shop
     view.innerHTML = `<div class="section-title"><h2>Shop</h2>
         <span class="hint"><a href="#dealer">← All shops</a></span></div>
         <div id="shop-body"><p class="empty">Loading…</p></div>`;
     try {
-        const [dealers, allBooks] = await Promise.all([Api.dealers(), Api.books()]);
-        const dealer = dealers.find((d) => d.dealerId === dealerId);
+        const [dealer, mine] = await Promise.all([Api.dealer(dealerId), Api.dealerBooks(dealerId)]);
         const body = document.getElementById('shop-body');
-        if (!dealer) { body.innerHTML = `<p class="empty">Shop not found.</p>`; return; }
 
         let html = `<div class="shop-detail-head">
             ${avatarHtml(dealer)}
             <div><h2>${escapeHtml(dealer.shopName)}</h2>
                 <p class="shop-owner">Run by ${escapeHtml(dealer.ownerName)}</p></div></div>`;
 
-        const mine = allBooks.filter((b) => b.dealerId === dealerId);
         if (!mine.length) {
             body.innerHTML = html + `<p class="empty">This shop has no books in stock right now.</p>`;
             return;
@@ -177,32 +176,6 @@ async function renderDealerBooks(dealerId) {
     }
 }
 
-async function renderBooks() {
-    view.innerHTML = `<div class="section-title"><h2>Books</h2>
-        <span class="hint">Each book sells its tickets in a fixed order. Buy one to scratch it.</span></div>
-        <div class="grid" id="grid"><p class="empty">Loading…</p></div>`;
-    try {
-        const books = await Api.books();
-        const grid = document.getElementById('grid');
-        if (!books.length) { grid.innerHTML = `<p class="empty">No books available.</p>`; return; }
-        // Stable order (by id) so each book keeps the same friendly number across reloads.
-        books.sort((a, b) => a.bookId.localeCompare(b.bookId));
-        grid.innerHTML = books.map((b, i) => `
-            <div class="card">
-                <h3>Book #${i + 1}</h3>
-                <div class="meta">
-                    <span>Tickets <b>${b.totalTickets}</b></span>
-                    <span>Remaining <b>${b.ticketsRemaining}</b></span>
-                </div>
-                <button class="btn block" data-book="${b.bookId}" ${b.ticketsRemaining ? '' : 'disabled'}>
-                    Buy &amp; Scratch</button>
-            </div>`).join('');
-        grid.querySelectorAll('button[data-book]').forEach((btn) => {
-            btn.onclick = () => buyTicket(btn.dataset.book);
-        });
-    } catch (e) { view.querySelector('#grid').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`; }
-}
-
 async function buyTicket(bookId) {
     if (!state.player) return;
     try {
@@ -223,7 +196,7 @@ function renderScratch() {
     const t = state.pendingTicket;
     if (!t) {
         view.innerHTML = `<div class="section-title"><h2>Scratch</h2></div>
-            <p class="empty">No ticket in hand. Go to <a href="#book">Books</a> and buy one.</p>`;
+            <p class="empty">No ticket in hand. Visit a <a href="#dealer">shop</a> and buy one.</p>`;
         return;
     }
     const art = TICKET_ART[t.mechanic] || TICKET_ART.CELESTIAL_FORTUNE;
@@ -259,7 +232,10 @@ function showResult(outcome) {
     banner.hidden = false;
     const again = document.getElementById('buy-another');
     again.hidden = false;
-    again.onclick = () => { state.pendingTicket = null; location.hash = '#book'; };
+    again.onclick = () => {
+        state.pendingTicket = null;
+        location.hash = state.lastShop ? `#dealer/${state.lastShop}` : '#dealer';
+    };
     state.pendingTicket = null; // consumed
 }
 
@@ -315,7 +291,7 @@ function txnTable(txns) {
 
 // ---- router ----------------------------------------------------------------
 
-const ROUTES = { dealer: renderDealers, book: renderBooks, scratch: renderScratch, ledger: renderLedger };
+const ROUTES = { dealer: renderDealers, scratch: renderScratch, ledger: renderLedger };
 
 function route() {
     const raw = location.hash.replace('#', '') || 'dealer';

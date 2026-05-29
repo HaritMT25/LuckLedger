@@ -32,7 +32,8 @@ const Api = (() => {
         borrow: (id, amount) => request('POST', `/players/${id}/borrow`, { amount }),
         // catalogue
         dealers: () => request('GET', '/dealers'),
-        books: () => request('GET', '/books'),
+        dealer: (id) => request('GET', `/dealers/${id}`),
+        dealerBooks: (id) => request('GET', `/dealers/${id}/books`),
         games: () => request('GET', '/games'),
         // play
         purchase: (bookId, playerId) => request('POST', `/books/${bookId}/purchase`, { playerId }),
