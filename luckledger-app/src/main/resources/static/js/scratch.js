@@ -1,17 +1,19 @@
-/* Canvas scratch surface. The ticket art lives in a sibling <img> behind the canvas (see renderScratch
- * in app.js). Over each scratch zone (coin circles, crystal cells, talismans) this canvas paints a
- * *frosted copy of that symbol* taken from the ticket art itself — not a plain silver patch — so the
- * symbol is what you scratch. Pointer events erase the frost with destination-out, revealing the crisp
- * symbol beneath.
+/* Canvas scratch surface — the FOIL layer of a real lottery ticket.
  *
- * Each zone is INDEPENDENT: it tracks its own scratched fraction, and reveals (snaps fully clear) only
- * itself once scratched past the threshold — scratching one symbol never uncovers the others. When
- * every zone has been revealed, `onReveal` fires once (the caller then hits the reveal API). */
+ * The ticket art is a sibling <img>; a "reveal" canvas sits above it carrying the hidden numbers; and
+ * THIS canvas sits on top, painting each scratch zone (coin circles, crystal cells, talismans) with the
+ * SYMBOL ITSELF, lifted pixel-for-pixel from the ticket art. That symbol is the scratch coating — just
+ * like the silver diamond on a real ticket. Erasing it with destination-out uncovers the number on the
+ * reveal canvas below.
+ *
+ * Each zone is INDEPENDENT: it tracks its own scratched fraction and snaps fully clear only ITSELF once
+ * past the threshold — scratching one symbol never uncovers the others. When every zone has been
+ * cleared, `onReveal` fires once. */
 
 class ScratchCard {
     /**
-     * @param canvas  overlay canvas (its width/height set the working resolution)
-     * @param img     the loaded ticket <img> (source for the frosted coating); may be null → plain frost
+     * @param canvas  foil canvas (its width/height set the working resolution)
+     * @param img     the loaded ticket <img>, source of the per-zone symbol coating
      * @param zones   scratch zones in image fractions: {shape:'circle',cx,cy,r} | {shape:'rect',x,y,w,h}
      * @param onReveal called once when every zone has been scratched clear
      */
@@ -24,7 +26,7 @@ class ScratchCard {
         this.revealed = false;
         this.scratching = false;
         this.zoneThreshold = 0.55; // fraction of a single zone cleared before it snaps fully revealed
-        this.brush = 34;
+        this.brush = 30;
         this.W = canvas.width;
         this.H = canvas.height;
         this.last = null;
@@ -33,7 +35,7 @@ class ScratchCard {
         this._bind();
     }
 
-    /** Paints the frosted symbol coating over each zone and records each zone's initial coated area. */
+    /** Paints the symbol coating over each zone and records each zone's initial coated area. */
     _coat() {
         const { ctx, W, H } = this;
         ctx.globalCompositeOperation = 'source-over';
@@ -57,28 +59,12 @@ class ScratchCard {
         ctx.clip();
 
         if (this.img && this.img.naturalWidth) {
-            // Frosted copy of the symbol itself, lifted from the ticket art.
+            // The coating IS the symbol — the exact coin/crystal/talisman pixels from the ticket art.
             const s = this._srcRect(z);
-            ctx.filter = 'blur(2px) brightness(1.35) saturate(0.55)';
             ctx.drawImage(this.img, s.x, s.y, s.w, s.h, bb.x, bb.y, bb.w, bb.h);
-            ctx.filter = 'none';
-            ctx.fillStyle = 'rgba(226,232,240,0.42)'; // icy veil so it reads as "unscratched"
-            ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
         } else {
-            const g = ctx.createLinearGradient(bb.x, bb.y, bb.x + bb.w, bb.y + bb.h);
-            g.addColorStop(0, '#dfe1ea'); g.addColorStop(0.5, '#b6b8c4'); g.addColorStop(1, '#d2d4dc');
-            ctx.fillStyle = g;
+            ctx.fillStyle = 'rgba(20,16,30,0.7)'; // fallback only if the art failed to load
             ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
-        }
-
-        // diagonal sheen streaks
-        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-        ctx.lineWidth = 2;
-        for (let x = bb.x - bb.h; x < bb.x + bb.w; x += 6) {
-            ctx.beginPath();
-            ctx.moveTo(x, bb.y);
-            ctx.lineTo(x + bb.h, bb.y + bb.h);
-            ctx.stroke();
         }
         ctx.restore();
     }
@@ -189,7 +175,7 @@ class ScratchCard {
         return coated;
     }
 
-    /** Fully clears a single zone's coating (its shape), revealing the symbol beneath. */
+    /** Fully clears a single zone's coating (its shape), uncovering the number beneath. */
     _clearZone(z) {
         const { ctx } = this;
         const bb = this._bbox(z);

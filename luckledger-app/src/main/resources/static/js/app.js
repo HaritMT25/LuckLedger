@@ -209,40 +209,114 @@ async function renderScratch() {
         return;
     }
     const art = TICKET_ART[t.mechanic] || TICKET_ART.CELESTIAL_FORTUNE;
-    // Canvas resolution matches the ticket art's 1080×1920 (9:16) aspect, scaled down.
+    // Layers (bottom→top): ticket art · reveal canvas (hidden numbers) · foil canvas (the symbols).
     view.innerHTML = `
         <div class="section-title"><h2>Scratch your ticket</h2>
             <span class="hint">${t.mechanic.replace('_', ' ')}</span></div>
         <div class="scratch-wrap">
             <div class="scratch-stage">
                 <img class="scratch-art" src="${art}" alt="ticket art" draggable="false">
+                <canvas id="reveal" class="scratch-canvas" width="360" height="640"></canvas>
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
-            <p class="scratch-instructions">Scratch each symbol to reveal it — they uncover independently.</p>
+            <p class="scratch-instructions">Scratch the coins and crystals off to reveal the numbers underneath.</p>
             <button class="btn secondary" id="buy-another" hidden>Buy another</button>
         </div>`;
 
-    // Coat only the scratch zones for this ticket, so the rest of the art stays visible.
     const cfg = await loadScratchZones();
     const ticket = cfg && cfg.tickets && cfg.tickets[t.mechanic];
     const zones = ticket ? ticket.zones.filter((z) => z.scratch && z.shape !== 'path') : [];
 
-    const canvas = document.getElementById('scratch');
+    const foil = document.getElementById('scratch');
+    const reveal = document.getElementById('reveal');
     const artImg = document.querySelector('.scratch-art');
-    if (!canvas || !artImg) return; // navigated away while loading
+    if (!foil || !reveal || !artImg) return; // navigated away while loading
+
+    // Reveal the outcome up front (server-side; idempotent) so the hidden numbers are consistent with
+    // win/loss. The result banner is held back until the player has scratched everything.
+    let outcome;
+    try {
+        outcome = await Api.reveal(t.ticketId, state.player.playerId);
+    } catch (e) {
+        outcome = await Api.ticket(t.ticketId).catch(() => ({ isWinner: false, prizeAmount: 0 }));
+    }
+
+    // Draw the hidden numbers on the reveal layer (under the foil).
+    drawHiddenNumbers(reveal, zones, t.mechanic, t.ticketId, outcome);
 
     const onAllScratched = async () => {
-        try {
-            const outcome = await Api.reveal(t.ticketId, state.player.playerId);
-            showResult(outcome);
-            await refreshPlayer();
-        } catch (e) { toast(e.message, true); }
+        showResult(outcome);
+        await refreshPlayer();
     };
-    // The coating is lifted from the ticket art, so wait until the image has decoded.
-    const start = () => new ScratchCard(canvas, artImg, zones, onAllScratched);
+    // The foil is lifted from the ticket art, so wait until the image has decoded.
+    const start = () => new ScratchCard(foil, artImg, zones, onAllScratched);
     if (artImg.complete && artImg.naturalWidth) start();
     else artImg.addEventListener('load', start, { once: true });
+}
+
+// ---- hidden numbers (the reveal layer under the foil) ----------------------
+
+/** Small deterministic PRNG so a ticket always shows the same numbers. */
+function seededRandom(str) {
+    let h = 1779033703 ^ str.length;
+    for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+    return function () { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+}
+
+/** Numbers for each zone, consistent with the outcome (a winner shows a match; a loser never does). */
+function numbersForTicket(zones, mechanic, ticketId, outcome) {
+    const rnd = seededRandom(ticketId + ':' + mechanic);
+    const pick = (max) => 1 + Math.floor(rnd() * max);
+    const won = !!(outcome && (outcome.isWinner ?? outcome.winner)) && Number(outcome.prizeAmount || 0) > 0;
+    const out = {};
+
+    if (mechanic === 'CELESTIAL_FORTUNE') {
+        const winning = [];
+        while (winning.length < 4) { const n = pick(60); if (!winning.includes(n)) winning.push(n); }
+        zones.filter((z) => z.id.startsWith('win-')).forEach((z, i) => { out[z.id] = winning[i] ?? pick(60); });
+        const crystals = zones.filter((z) => z.id.startsWith('num-'));
+        const matchAt = won ? Math.floor(rnd() * crystals.length) : -1;
+        crystals.forEach((z, i) => {
+            if (i === matchAt) { out[z.id] = winning[Math.floor(rnd() * winning.length)]; return; }
+            let n; do { n = pick(60); } while (winning.includes(n)); // never an accidental match
+            out[z.id] = n;
+        });
+    } else {
+        // Demon Seal and any other mechanic: a value per scratch zone; the banner is the official result.
+        zones.forEach((z) => { out[z.id] = won ? '★' : pick(99); });
+    }
+    return out;
+}
+
+/** Paints each zone's hidden number on a small plaque on the reveal canvas. */
+function drawHiddenNumbers(canvas, zones, mechanic, ticketId, outcome) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const values = numbersForTicket(zones, mechanic, ticketId, outcome);
+    ctx.clearRect(0, 0, W, H);
+    for (const z of zones) {
+        const bb = z.shape === 'circle'
+            ? { x: z.cx * W - z.r * W, y: z.cy * H - z.r * W, w: z.r * 2 * W, h: z.r * 2 * W }
+            : { x: z.x * W, y: z.y * H, w: z.w * W, h: z.h * H };
+        const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+
+        ctx.save();
+        ctx.beginPath();
+        if (z.shape === 'circle') ctx.arc(cx, cy, Math.min(bb.w, bb.h) / 2, 0, Math.PI * 2);
+        else { const r = Math.min(bb.w, bb.h) * 0.18, x = bb.x, y = bb.y, w = bb.w, h = bb.h;
+            ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+        ctx.fillStyle = '#140f22';
+        ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(243,201,105,0.55)'; ctx.stroke();
+
+        ctx.fillStyle = '#f3c969';
+        ctx.font = `700 ${Math.round(Math.min(bb.w, bb.h) * 0.5)}px "Segoe UI", system-ui, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(values[z.id] ?? '?'), cx, cy);
+        ctx.restore();
+    }
 }
 
 function showResult(outcome) {
