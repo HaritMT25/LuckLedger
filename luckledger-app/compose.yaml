@@ -1,0 +1,12 @@
+# Local-development Postgres for LuckLedger. Spring Boot's docker-compose support
+# (luckledger-app) auto-starts this on `mvn spring-boot:run` and wires the datasource.
+# Tests use their own Testcontainers instance and ignore this file.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: luckledger
+      POSTGRES_USER: luckledger
+      POSTGRES_PASSWORD: luckledger
+    ports:
+      - "5432:5432"

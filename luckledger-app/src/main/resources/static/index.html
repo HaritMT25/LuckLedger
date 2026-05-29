@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LuckLedger — Scratch Card Awareness Simulator</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <span class="logo">🎟️</span>
+        <div>
+            <h1>LuckLedger</h1>
+            <p class="tagline">A gambling-awareness scratch card simulator — coins have no value.</p>
+        </div>
+    </div>
+    <div id="player-bar" class="player-bar">
+        <!-- populated by app.js -->
+    </div>
+</header>
+
+<nav class="tabs">
+    <a href="#dealer" data-route="dealer">Dealers</a>
+    <a href="#book" data-route="book">Books</a>
+    <a href="#scratch" data-route="scratch">Scratch</a>
+    <a href="#ledger" data-route="ledger">Ledger</a>
+</nav>
+
+<main id="view" class="view"></main>
+
+<div id="toast" class="toast" hidden></div>
+
+<footer class="footer">
+    <p>Educational simulator. No real money, no payouts, no purchases. The house always wins — that's the point.</p>
+</footer>
+
+<script src="js/api.js"></script>
+<script src="js/scratch.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
