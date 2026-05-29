@@ -151,7 +151,66 @@ async function buyTicket(bookId) {
     }
 }
 
-function renderScratch() {
+// Cached scratch-zone config (config/scratch-zones.json); loaded once and reused.
+let _scratchZonesCache = null;
+async function loadScratchZones() {
+    if (_scratchZonesCache) return _scratchZonesCache;
+    const res = await fetch('config/scratch-zones.json');
+    _scratchZonesCache = await res.json();
+    return _scratchZonesCache;
+}
+
+/* Small deterministic PRNG so a ticket always shows the same numbers across reveals/reloads. */
+function seededRandom(str) {
+    let h = 1779033703 ^ str.length;
+    for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+    return function () { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+}
+
+/* Per-zone display values, consistent with the outcome: a winner shows a match, a loser never does.
+   Returns an array aligned with the given scratch zones. */
+function numbersForTicket(zones, mechanic, ticketId, outcome) {
+    const rnd = seededRandom(ticketId + ':' + mechanic);
+    const pick = (max) => 1 + Math.floor(rnd() * max);
+    const won = !!(outcome && (outcome.isWinner ?? outcome.winner)) && Number(outcome.prizeAmount || 0) > 0;
+
+    if (mechanic === 'CELESTIAL_FORTUNE') {
+        const byId = {};
+        const winning = [];
+        while (winning.length < 4) { const n = pick(60); if (!winning.includes(n)) winning.push(n); }
+        const winZones = zones.filter((z) => z.id && z.id.startsWith('win-'));
+        winZones.forEach((z, i) => { byId[z.id] = winning[i] ?? pick(60); });
+        const crystals = zones.filter((z) => z.id && z.id.startsWith('num-'));
+        const matchAt = won ? Math.floor(rnd() * crystals.length) : -1;
+        crystals.forEach((z, i) => {
+            if (i === matchAt) { byId[z.id] = winning[Math.floor(rnd() * winning.length)]; return; }
+            let n; do { n = pick(60); } while (winning.includes(n)); // never an accidental match
+            byId[z.id] = n;
+        });
+        return zones.map((z) => String(byId[z.id] ?? pick(60)));
+    }
+    // Demon Seal and any other mechanic: a value per scratch zone; the banner is the official result.
+    return zones.map(() => (won ? '★' : String(pick(99))));
+}
+
+/* Renders each zone's hidden value as a DOM label, centred on its zone, in the dark reveal layer. */
+function drawHiddenNumbers(layer, zones, mechanic, ticketId, outcome) {
+    const values = numbersForTicket(zones, mechanic, ticketId, outcome);
+    layer.innerHTML = '';
+    zones.forEach((z, i) => {
+        // Zone coords are fractions (0..1). Centre: circle → (cx, cy); rect → (x + w/2, y + h/2).
+        const cx = z.shape === 'circle' ? z.cx : z.x + z.w / 2;
+        const cy = z.shape === 'circle' ? z.cy : z.y + z.h / 2;
+        const span = document.createElement('span');
+        span.className = 'value-label';
+        span.textContent = values[i];
+        span.style.left = `${cx * 100}%`;
+        span.style.top = `${cy * 100}%`;
+        layer.appendChild(span);
+    });
+}
+
+async function renderScratch() {
     const t = state.pendingTicket;
     if (!t) {
         view.innerHTML = `<div class="section-title"><h2>Scratch</h2></div>
@@ -159,28 +218,53 @@ function renderScratch() {
         return;
     }
     const art = TICKET_ART[t.mechanic] || TICKET_ART.CELESTIAL_FORTUNE;
-    // Canvas resolution matches the ticket art's 1080×1920 (9:16) aspect, scaled down.
+    // The ticket PNG IS the coating: it is drawn onto the scratch canvas. Beneath the canvas sits the
+    // dark reveal layer (a DOM div) holding one number label per scratch zone. Scratching the PNG away
+    // uncovers those labels.
     view.innerHTML = `
         <div class="section-title"><h2>Scratch your ticket</h2>
             <span class="hint">${t.mechanic.replace('_', ' ')}</span></div>
         <div class="scratch-wrap">
             <div class="scratch-stage">
-                <img class="scratch-art" src="${art}" alt="ticket art" draggable="false">
+                <div id="reveal-layer" class="reveal-layer"></div>
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
-            <p class="scratch-instructions">Drag across the silver coating to reveal the ticket.</p>
+            <p class="scratch-instructions">Scratch the ticket off to reveal the numbers underneath.</p>
             <button class="btn secondary" id="buy-another" hidden>Buy another</button>
         </div>`;
 
-    const card = new ScratchCard(document.getElementById('scratch'), async () => {
-        try {
-            const outcome = await Api.reveal(t.ticketId, state.player.playerId);
-            showResult(outcome);
-            card.finish();
-            await refreshPlayer();
-        } catch (e) { toast(e.message, true); }
-    });
+    const canvas = document.getElementById('scratch');
+    const revealLayer = document.getElementById('reveal-layer');
+    if (!canvas || !revealLayer) return; // navigated away while rendering
+
+    // Scratch zones for this mechanic (fractions of width/height); skip non-scratch and path shapes.
+    let zones = [];
+    try {
+        const cfg = await loadScratchZones();
+        const ticket = cfg && cfg.tickets && cfg.tickets[t.mechanic];
+        zones = ticket ? ticket.zones.filter((z) => z.scratch && z.shape !== 'path') : [];
+    } catch (e) { zones = []; }
+    if (!document.getElementById('reveal-layer')) return; // navigated away during the await
+
+    // Reveal the outcome up front (server-side; idempotent) so the hidden numbers are consistent with
+    // win/loss. The result banner is held back until the player has scratched the foil away.
+    let outcome;
+    try {
+        outcome = await Api.reveal(t.ticketId, state.player.playerId);
+    } catch (e) {
+        outcome = await Api.ticket(t.ticketId).catch(() => ({ isWinner: false, prizeAmount: 0 }));
+    }
+    if (!document.getElementById('reveal-layer')) return; // navigated away during the await
+
+    // Render the hidden numbers as DOM labels on the dark reveal layer (under the canvas).
+    drawHiddenNumbers(revealLayer, zones, t.mechanic, t.ticketId, outcome);
+
+    const onReveal = async () => {
+        showResult(outcome);
+        await refreshPlayer();
+    };
+    initScratch(canvas, art, onReveal);
 }
 
 function showResult(outcome) {
