@@ -219,7 +219,7 @@ async function renderScratch() {
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
-            <p class="scratch-instructions">Scratch the coated symbols to reveal your ticket.</p>
+            <p class="scratch-instructions">Scratch each symbol to reveal it — they uncover independently.</p>
             <button class="btn secondary" id="buy-another" hidden>Buy another</button>
         </div>`;
 
@@ -229,15 +229,20 @@ async function renderScratch() {
     const zones = ticket ? ticket.zones.filter((z) => z.scratch && z.shape !== 'path') : [];
 
     const canvas = document.getElementById('scratch');
-    if (!canvas) return; // navigated away while loading
-    const card = new ScratchCard(canvas, zones, async () => {
+    const artImg = document.querySelector('.scratch-art');
+    if (!canvas || !artImg) return; // navigated away while loading
+
+    const onAllScratched = async () => {
         try {
             const outcome = await Api.reveal(t.ticketId, state.player.playerId);
             showResult(outcome);
-            card.finish();
             await refreshPlayer();
         } catch (e) { toast(e.message, true); }
-    });
+    };
+    // The coating is lifted from the ticket art, so wait until the image has decoded.
+    const start = () => new ScratchCard(canvas, artImg, zones, onAllScratched);
+    if (artImg.complete && artImg.naturalWidth) start();
+    else artImg.addEventListener('load', start, { once: true });
 }
 
 function showResult(outcome) {

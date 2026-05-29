@@ -39,7 +39,7 @@
         { "id": "seal-lower-left",  "label": "Seal — lower left",   "shape": "rect", "scratch": true, "x": 0.110, "y": 0.580, "w": 0.110, "h": 0.130 },
         { "id": "seal-upper-left",  "label": "Seal — upper left",   "shape": "rect", "scratch": true, "x": 0.110, "y": 0.305, "w": 0.110, "h": 0.130 },
 
-        { "id": "demon-center", "label": "Center demon circle", "shape": "circle", "scratch": true, "cx": 0.500, "cy": 0.555, "r": 0.235 },
+        { "id": "demon-center", "label": "Center demon circle", "shape": "circle", "scratch": false, "cx": 0.500, "cy": 0.555, "r": 0.235 },
 
         { "id": "fire-chain", "label": "Fire chain path (decorative)", "shape": "path", "scratch": false,
           "points": [

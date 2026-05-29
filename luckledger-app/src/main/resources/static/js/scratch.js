@@ -1,67 +1,78 @@
 /* Canvas scratch surface. The ticket art lives in a sibling <img> behind the canvas (see renderScratch
- * in app.js); this canvas paints a metallic coating ONLY over the configured scratch zones (the coin
- * circles, crystal cells, seals, …), leaving the rest of the ticket art fully visible. Pointer events
- * erase the coating with `globalCompositeOperation = 'destination-out'`, revealing the symbol beneath.
- * Once enough of the coated area is cleared it fires `onReveal` once (the caller then hits the reveal
- * API). Erasing uses a wide round-capped brush with line interpolation, so a drag clears a swathe. */
+ * in app.js). Over each scratch zone (coin circles, crystal cells, talismans) this canvas paints a
+ * *frosted copy of that symbol* taken from the ticket art itself — not a plain silver patch — so the
+ * symbol is what you scratch. Pointer events erase the frost with destination-out, revealing the crisp
+ * symbol beneath.
+ *
+ * Each zone is INDEPENDENT: it tracks its own scratched fraction, and reveals (snaps fully clear) only
+ * itself once scratched past the threshold — scratching one symbol never uncovers the others. When
+ * every zone has been revealed, `onReveal` fires once (the caller then hits the reveal API). */
 
 class ScratchCard {
     /**
-     * @param canvas  the overlay canvas (its width/height set the working resolution)
+     * @param canvas  overlay canvas (its width/height set the working resolution)
+     * @param img     the loaded ticket <img> (source for the frosted coating); may be null → plain frost
      * @param zones   scratch zones in image fractions: {shape:'circle',cx,cy,r} | {shape:'rect',x,y,w,h}
-     * @param onReveal called once when enough coating is cleared
+     * @param onReveal called once when every zone has been scratched clear
      */
-    constructor(canvas, zones, onReveal) {
+    constructor(canvas, img, zones, onReveal) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d', { willReadFrequently: true });
+        this.img = img;
         this.zones = (zones && zones.length) ? zones : [{ shape: 'rect', x: 0, y: 0, w: 1, h: 1 }];
         this.onReveal = onReveal;
         this.revealed = false;
         this.scratching = false;
-        this.threshold = 0.5;  // fraction of the COATED area cleared before auto-reveal
-        this.brush = 38;
+        this.zoneThreshold = 0.55; // fraction of a single zone cleared before it snaps fully revealed
+        this.brush = 34;
         this.W = canvas.width;
         this.H = canvas.height;
         this.last = null;
-        this.initialCoated = 1;
 
         this._coat();
         this._bind();
     }
 
-    /** Paints the metallic coating over each scratch zone; everything else stays transparent. */
+    /** Paints the frosted symbol coating over each zone and records each zone's initial coated area. */
     _coat() {
         const { ctx, W, H } = this;
         ctx.globalCompositeOperation = 'source-over';
         ctx.clearRect(0, 0, W, H);
         for (const z of this.zones) this._paintZone(z);
-        this.initialCoated = Math.max(1, this._coatedCount());
+
+        const data = ctx.getImageData(0, 0, W, H).data;
+        this.state = this.zones.map((z) => {
+            const bb = this._bbox(z);
+            return { z, bb, initial: Math.max(1, this._coatedIn(data, bb)), done: false };
+        });
     }
 
     _paintZone(z) {
-        const { ctx, W, H } = this;
+        const { ctx } = this;
         const bb = this._bbox(z);
         ctx.save();
         ctx.beginPath();
-        if (z.shape === 'circle') {
-            ctx.arc(z.cx * W, z.cy * H, z.r * W, 0, Math.PI * 2);
-        } else {
-            this._roundRect(bb.x, bb.y, bb.w, bb.h, Math.min(bb.w, bb.h) * 0.18);
-        }
+        if (z.shape === 'circle') ctx.arc(z.cx * this.W, z.cy * this.H, z.r * this.W, 0, Math.PI * 2);
+        else this._roundRectPath(bb.x, bb.y, bb.w, bb.h, Math.min(bb.w, bb.h) * 0.18);
         ctx.clip();
 
-        // brushed-metal fill
-        const g = ctx.createLinearGradient(bb.x, bb.y, bb.x + bb.w, bb.y + bb.h);
-        g.addColorStop(0.0, '#aeb0bb');
-        g.addColorStop(0.3, '#e6e7ee');
-        g.addColorStop(0.55, '#9a9ca8');
-        g.addColorStop(0.8, '#cdced6');
-        g.addColorStop(1.0, '#868792');
-        ctx.fillStyle = g;
-        ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+        if (this.img && this.img.naturalWidth) {
+            // Frosted copy of the symbol itself, lifted from the ticket art.
+            const s = this._srcRect(z);
+            ctx.filter = 'blur(2px) brightness(1.35) saturate(0.55)';
+            ctx.drawImage(this.img, s.x, s.y, s.w, s.h, bb.x, bb.y, bb.w, bb.h);
+            ctx.filter = 'none';
+            ctx.fillStyle = 'rgba(226,232,240,0.42)'; // icy veil so it reads as "unscratched"
+            ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+        } else {
+            const g = ctx.createLinearGradient(bb.x, bb.y, bb.x + bb.w, bb.y + bb.h);
+            g.addColorStop(0, '#dfe1ea'); g.addColorStop(0.5, '#b6b8c4'); g.addColorStop(1, '#d2d4dc');
+            ctx.fillStyle = g;
+            ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+        }
 
         // diagonal sheen streaks
-        ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
         ctx.lineWidth = 2;
         for (let x = bb.x - bb.h; x < bb.x + bb.w; x += 6) {
             ctx.beginPath();
@@ -72,6 +83,16 @@ class ScratchCard {
         ctx.restore();
     }
 
+    /** Source rectangle (natural image pixels) for a zone — what to lift from the ticket art. */
+    _srcRect(z) {
+        const nw = this.img.naturalWidth, nh = this.img.naturalHeight;
+        if (z.shape === 'circle') {
+            const rp = z.r * nw;
+            return { x: z.cx * nw - rp, y: z.cy * nh - rp, w: rp * 2, h: rp * 2 };
+        }
+        return { x: z.x * nw, y: z.y * nh, w: z.w * nw, h: z.h * nh };
+    }
+
     _bbox(z) {
         const { W, H } = this;
         if (z.shape === 'circle') {
@@ -80,7 +101,7 @@ class ScratchCard {
         return { x: z.x * W, y: z.y * H, w: z.w * W, h: z.h * H };
     }
 
-    _roundRect(x, y, w, h, r) {
+    _roundRectPath(x, y, w, h, r) {
         const ctx = this.ctx;
         ctx.moveTo(x + r, y);
         ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -137,32 +158,46 @@ class ScratchCard {
         this.last = { x, y };
     }
 
+    /** Per-zone progress: a zone that crosses its threshold snaps fully clear — only itself. */
     _check() {
         if (this.revealed) return;
-        if (this._clearedFraction() >= this.threshold) {
+        const data = this.ctx.getImageData(0, 0, this.W, this.H).data;
+        for (const st of this.state) {
+            if (st.done) continue;
+            const cur = this._coatedIn(data, st.bb);
+            if ((st.initial - cur) / st.initial >= this.zoneThreshold) {
+                st.done = true;
+                this._clearZone(st.z); // reveal this zone in full, leaving the others coated
+            }
+        }
+        if (this.state.every((s) => s.done)) {
             this.revealed = true;
             this.onReveal();
         }
     }
 
-    /** Count of still-coated sampled pixels (alpha above a small threshold). */
-    _coatedCount() {
-        const data = this.ctx.getImageData(0, 0, this.W, this.H).data;
+    /** Coated (alpha-bearing) sample count within a bounding box. */
+    _coatedIn(data, bb) {
+        const x0 = Math.max(0, Math.floor(bb.x)), x1 = Math.min(this.W, Math.ceil(bb.x + bb.w));
+        const y0 = Math.max(0, Math.floor(bb.y)), y1 = Math.min(this.H, Math.ceil(bb.y + bb.h));
         let coated = 0;
-        for (let i = 3; i < data.length; i += 40) if (data[i] > 40) coated++;
+        for (let y = y0; y < y1; y += 2) {
+            for (let x = x0; x < x1; x += 2) {
+                if (data[(y * this.W + x) * 4 + 3] > 40) coated++;
+            }
+        }
         return coated;
     }
 
-    /** Fraction of the originally-coated area that has been scratched away. */
-    _clearedFraction() {
-        return (this.initialCoated - this._coatedCount()) / this.initialCoated;
-    }
-
-    /** Clears all remaining coating (used once the result is shown). */
-    finish() {
-        this.revealed = true;
-        this.ctx.globalCompositeOperation = 'destination-out';
-        this.ctx.fillRect(0, 0, this.W, this.H);
-        this.ctx.globalCompositeOperation = 'source-over';
+    /** Fully clears a single zone's coating (its shape), revealing the symbol beneath. */
+    _clearZone(z) {
+        const { ctx } = this;
+        const bb = this._bbox(z);
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        if (z.shape === 'circle') ctx.arc(z.cx * this.W, z.cy * this.H, z.r * this.W, 0, Math.PI * 2);
+        else this._roundRectPath(bb.x, bb.y, bb.w, bb.h, Math.min(bb.w, bb.h) * 0.18);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
     }
 }
