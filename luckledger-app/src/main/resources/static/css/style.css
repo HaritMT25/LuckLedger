@@ -70,6 +70,12 @@ body {
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
 
+.game-group { margin-bottom: 1.8rem; }
+.game-group-title {
+    margin: 0 0 .8rem; font-size: 1.05rem; color: var(--gold);
+    padding-bottom: .4rem; border-bottom: 1px solid var(--border);
+}
+
 .card {
     background: linear-gradient(160deg, var(--panel) 0%, var(--panel-2) 100%);
     border: 1px solid var(--border);
@@ -101,13 +107,22 @@ body {
 
 .empty { color: var(--muted); padding: 2rem; text-align: center; }
 
-/* scratch */
+/* scratch — art layer behind, coating canvas on top (transparent where erased) */
 .scratch-wrap { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
-.scratch-stage { position: relative; width: 360px; max-width: 100%; }
-.scratch-canvas {
-    width: 100%; border-radius: var(--radius); border: 1px solid var(--border);
-    background: #000; touch-action: none; cursor: grab; display: block;
+.scratch-stage {
+    position: relative; width: 360px; max-width: 100%; aspect-ratio: 9 / 16;
+    border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border);
+    background: #0b0913;
 }
+.scratch-art {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; display: block; user-select: none; -webkit-user-drag: none;
+}
+.scratch-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    touch-action: none; cursor: grab; display: block; background: transparent;
+}
+.scratch-canvas:active { cursor: grabbing; }
 .result-banner {
     position: absolute; left: 0; right: 0; bottom: 0;
     padding: .8rem 1rem; text-align: center; font-weight: 700; font-size: 1.15rem;

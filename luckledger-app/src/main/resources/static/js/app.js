@@ -78,18 +78,34 @@ async function renderDealers() {
         <div class="grid" id="grid"><p class="empty">Loading…</p></div>`;
     try {
         const dealers = await Api.dealers();
-        const grid = document.getElementById('grid');
-        if (!dealers.length) { grid.innerHTML = `<p class="empty">No dealers seeded.</p>`; return; }
-        grid.innerHTML = dealers.map((d) => `
-            <div class="card">
-                <h3>${escapeHtml(d.name)}</h3>
-                <div class="meta">
-                    <span>Tier <b>${d.tier}</b></span>
-                    <span>Quartile <b>${d.quartile}</b></span>
-                    <span>Active books <b>${d.activeBooks}</b></span>
-                    <span>Books depleted <b>${d.booksDepleted}</b></span>
+        const container = document.getElementById('grid');
+        if (!dealers.length) { container.innerHTML = `<p class="empty">No dealers seeded.</p>`; return; }
+
+        // Group by game so the same-named storefronts from different games don't read as duplicates.
+        const byGame = new Map();
+        for (const d of dealers) {
+            const key = d.gameId || 'unknown';
+            if (!byGame.has(key)) byGame.set(key, { name: d.gameName || 'Game', dealers: [] });
+            byGame.get(key).dealers.push(d);
+        }
+
+        container.classList.remove('grid');
+        container.innerHTML = [...byGame.values()].map((group) => `
+            <section class="game-group">
+                <h3 class="game-group-title">${escapeHtml(group.name)}</h3>
+                <div class="grid">
+                    ${group.dealers.map((d) => `
+                        <div class="card">
+                            <h3>${escapeHtml(d.name)}</h3>
+                            <div class="meta">
+                                <span>Tier <b>${d.tier}</b></span>
+                                <span>Quartile <b>${d.quartile}</b></span>
+                                <span>Active books <b>${d.activeBooks}</b></span>
+                                <span>Books depleted <b>${d.booksDepleted}</b></span>
+                            </div>
+                        </div>`).join('')}
                 </div>
-            </div>`).join('');
+            </section>`).join('');
     } catch (e) { view.querySelector('#grid').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`; }
 }
 
@@ -101,9 +117,11 @@ async function renderBooks() {
         const books = await Api.books();
         const grid = document.getElementById('grid');
         if (!books.length) { grid.innerHTML = `<p class="empty">No books available.</p>`; return; }
-        grid.innerHTML = books.map((b) => `
+        // Stable order (by id) so each book keeps the same friendly number across reloads.
+        books.sort((a, b) => a.bookId.localeCompare(b.bookId));
+        grid.innerHTML = books.map((b, i) => `
             <div class="card">
-                <h3>Book ${b.bookId.slice(0, 8)}</h3>
+                <h3>Book #${i + 1}</h3>
                 <div class="meta">
                     <span>Tickets <b>${b.totalTickets}</b></span>
                     <span>Remaining <b>${b.ticketsRemaining}</b></span>
@@ -140,20 +158,22 @@ function renderScratch() {
             <p class="empty">No ticket in hand. Go to <a href="#book">Books</a> and buy one.</p>`;
         return;
     }
+    const art = TICKET_ART[t.mechanic] || TICKET_ART.CELESTIAL_FORTUNE;
+    // Canvas resolution matches the ticket art's 1080×1920 (9:16) aspect, scaled down.
     view.innerHTML = `
         <div class="section-title"><h2>Scratch your ticket</h2>
             <span class="hint">${t.mechanic.replace('_', ' ')}</span></div>
         <div class="scratch-wrap">
             <div class="scratch-stage">
-                <canvas id="scratch" class="scratch-canvas" width="360" height="480"></canvas>
+                <img class="scratch-art" src="${art}" alt="ticket art" draggable="false">
+                <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
             <p class="scratch-instructions">Drag across the silver coating to reveal the ticket.</p>
             <button class="btn secondary" id="buy-another" hidden>Buy another</button>
         </div>`;
 
-    const art = TICKET_ART[t.mechanic] || TICKET_ART.CELESTIAL_FORTUNE;
-    const card = new ScratchCard(document.getElementById('scratch'), art, async () => {
+    const card = new ScratchCard(document.getElementById('scratch'), async () => {
         try {
             const outcome = await Api.reveal(t.ticketId, state.player.playerId);
             showResult(outcome);

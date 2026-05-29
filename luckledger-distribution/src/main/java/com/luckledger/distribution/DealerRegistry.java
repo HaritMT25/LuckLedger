@@ -16,16 +16,33 @@ import java.util.UUID;
 public final class DealerRegistry {
 
     private final int booksPerCycle;
+    private final List<String> namePool;
     private final Map<UUID, Dealer> dealers = new LinkedHashMap<>();
 
     /**
+     * Creates a registry using the {@link NpcNames#DEFAULT default} storefront name pool.
+     *
      * @param booksPerCycle the per-cycle book cap applied to every dealer; {@code >= 1}
      */
     public DealerRegistry(int booksPerCycle) {
+        this(booksPerCycle, NpcNames.DEFAULT);
+    }
+
+    /**
+     * @param booksPerCycle the per-cycle book cap applied to every dealer; {@code >= 1}
+     * @param namePool the storefront names assigned to created dealers, in order (cycled and suffixed
+     *     if more dealers than names are requested); non-null and non-empty
+     */
+    public DealerRegistry(int booksPerCycle, List<String> namePool) {
         if (booksPerCycle < 1) {
             throw new IllegalArgumentException("booksPerCycle must be >= 1, was " + booksPerCycle);
         }
+        Objects.requireNonNull(namePool, "namePool must not be null");
+        if (namePool.isEmpty()) {
+            throw new IllegalArgumentException("namePool must not be empty");
+        }
         this.booksPerCycle = booksPerCycle;
+        this.namePool = List.copyOf(namePool);
     }
 
     /** All registered dealers, in registration order (unmodifiable). */
@@ -71,11 +88,21 @@ public final class DealerRegistry {
             throw new IllegalArgumentException("count must be >= 1, was " + count);
         }
         List<Dealer> created = new ArrayList<>(count);
-        for (int i = 1; i <= count; i++) {
-            Dealer dealer = new Dealer(UUID.randomUUID(), "Dealer " + i, DealerTier.TIER_1, 0, booksPerCycle, 0);
+        for (int i = 0; i < count; i++) {
+            Dealer dealer = new Dealer(UUID.randomUUID(), nameFor(i), DealerTier.TIER_1, 0, booksPerCycle, 0);
             dealers.put(dealer.dealerId(), dealer);
             created.add(dealer);
         }
         return created;
+    }
+
+    /**
+     * Picks the {@code index}-th storefront name. Names are drawn from the pool in order; once the pool
+     * is exhausted it wraps with a numeric suffix so every dealer keeps a distinct, non-blank name.
+     */
+    private String nameFor(int index) {
+        String base = namePool.get(index % namePool.size());
+        int cycle = index / namePool.size();
+        return cycle == 0 ? base : base + " " + (cycle + 1);
     }
 }

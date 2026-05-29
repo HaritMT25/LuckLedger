@@ -5,6 +5,7 @@ import com.luckledger.distribution.BookPartitioner;
 import com.luckledger.distribution.DealerAllocator;
 import com.luckledger.distribution.DealerRegistry;
 import com.luckledger.distribution.DealerTierResolver;
+import com.luckledger.distribution.NpcNames;
 import com.luckledger.domain.generation.OutcomeGenerator;
 import com.luckledger.domain.generation.ShuffleService;
 import com.luckledger.domain.generation.theme.AssetRef;
@@ -136,7 +137,8 @@ public class ApiConfig {
         GenerationPipeline pipeline = new GenerationPipeline(
                 outcomeGenerator, shuffleService, CELESTIAL, themes, verificationSuite, GridSize.FOUR);
         return new GameOrchestrator(
-                pipeline, bookPartitioner, new DealerAllocator(tierResolver), new DealerRegistry(50), themes);
+                pipeline, bookPartitioner, new DealerAllocator(tierResolver),
+                new DealerRegistry(50, NpcNames.CELESTIAL), themes);
     }
 
     @Bean
@@ -150,7 +152,8 @@ public class ApiConfig {
         GenerationPipeline pipeline = new GenerationPipeline(
                 outcomeGenerator, shuffleService, DEMON, themes, verificationSuite, GridSize.THREE);
         return new GameOrchestrator(
-                pipeline, bookPartitioner, new DealerAllocator(tierResolver), new DealerRegistry(50), themes);
+                pipeline, bookPartitioner, new DealerAllocator(tierResolver),
+                new DealerRegistry(50, NpcNames.DEMON), themes);
     }
 
     // --- seed configs ---------------------------------------------------------

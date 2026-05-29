@@ -1,65 +1,78 @@
-/* Canvas scratch surface. Draws the ticket art, lays an opaque coating over it, and erases the
- * coating under the pointer with `globalCompositeOperation = 'destination-out'`. Once enough of the
- * coating is gone it fires `onReveal` exactly once (the caller then hits the reveal API). */
+/* Canvas scratch surface. The ticket art lives in a sibling <img> *behind* the canvas (see
+ * renderScratch in app.js); this canvas holds only an opaque metallic coating. Pointer events erase
+ * the coating with `globalCompositeOperation = 'destination-out'`, so the art shows through wherever
+ * the player scratches. Once enough coating is gone it fires `onReveal` exactly once (the caller then
+ * hits the reveal API). Erasing uses a wide round-capped brush with line interpolation between pointer
+ * events, so a drag clears a continuous swathe rather than disconnected dots. */
 
 class ScratchCard {
-    constructor(canvas, imageSrc, onReveal) {
+    constructor(canvas, onReveal) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d', { willReadFrequently: true });
         this.onReveal = onReveal;
         this.revealed = false;
         this.scratching = false;
         this.threshold = 0.5; // fraction of coating cleared before auto-reveal
+        this.brush = 46;       // erase brush width in canvas px
         this.W = canvas.width;
         this.H = canvas.height;
+        this.last = null;      // previous pointer position, for line interpolation
 
-        const img = new Image();
-        img.onload = () => this._init(img);
-        img.onerror = () => this._init(null);
-        img.src = imageSrc;
-    }
-
-    _init(img) {
-        const { ctx, W, H } = this;
-        // base layer: the ticket art (cover-fit), or a fallback gradient
-        if (img) {
-            const scale = Math.max(W / img.width, H / img.height);
-            const w = img.width * scale, h = img.height * scale;
-            ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
-        } else {
-            const g = ctx.createLinearGradient(0, 0, W, H);
-            g.addColorStop(0, '#241c42');
-            g.addColorStop(1, '#0e0b16');
-            ctx.fillStyle = g;
-            ctx.fillRect(0, 0, W, H);
-        }
         this._coat();
         this._bind();
     }
 
+    /** Lays down the metallic silver coating that hides the art beneath. */
     _coat() {
         const { ctx, W, H } = this;
+        ctx.globalCompositeOperation = 'source-over';
+
+        // brushed-metal base gradient
         const g = ctx.createLinearGradient(0, 0, W, H);
-        g.addColorStop(0, '#9a9a9a');
-        g.addColorStop(0.5, '#c4c4c4');
-        g.addColorStop(1, '#8c8c8c');
+        g.addColorStop(0.0, '#b7b8c2');
+        g.addColorStop(0.25, '#e9eaf0');
+        g.addColorStop(0.5, '#9c9da9');
+        g.addColorStop(0.75, '#d2d3db');
+        g.addColorStop(1.0, '#8a8b96');
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = 'rgba(40,40,40,.55)';
-        ctx.font = 'bold 22px "Segoe UI", sans-serif';
+
+        // faint diagonal streaks for a brushed, metallic sheen
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 2;
+        for (let x = -H; x < W; x += 7) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x + H, H);
+            ctx.stroke();
+        }
+
+        // prompt text
+        ctx.fillStyle = 'rgba(40,40,48,.55)';
         ctx.textAlign = 'center';
+        ctx.font = '700 22px "Segoe UI", system-ui, sans-serif';
         ctx.fillText('SCRATCH HERE', W / 2, H / 2);
-        ctx.font = '13px "Segoe UI", sans-serif';
+        ctx.font = '13px "Segoe UI", system-ui, sans-serif';
         ctx.fillText('drag to reveal your ticket', W / 2, H / 2 + 26);
     }
 
     _bind() {
         const c = this.canvas;
-        const move = (e) => this._move(e);
-        c.addEventListener('pointerdown', (e) => { this.scratching = true; c.setPointerCapture(e.pointerId); this._erase(e); });
-        c.addEventListener('pointerup', () => { this.scratching = false; this._check(); });
-        c.addEventListener('pointerleave', () => { this.scratching = false; });
-        c.addEventListener('pointermove', move);
+        c.addEventListener('pointerdown', (e) => {
+            if (this.revealed) return;
+            this.scratching = true;
+            this.last = null;
+            c.setPointerCapture(e.pointerId);
+            this._stroke(this._pos(e));
+        });
+        c.addEventListener('pointermove', (e) => {
+            if (!this.scratching || this.revealed) return;
+            this._stroke(this._pos(e));
+        });
+        const end = () => { this.scratching = false; this.last = null; this._check(); };
+        c.addEventListener('pointerup', end);
+        c.addEventListener('pointercancel', end);
+        c.addEventListener('pointerleave', () => { this.scratching = false; this.last = null; });
     }
 
     _pos(e) {
@@ -70,19 +83,28 @@ class ScratchCard {
         };
     }
 
-    _erase(e) {
+    /** Erases a round dot at the point and, if dragging, a fat line from the previous point to it. */
+    _stroke({ x, y }) {
         const { ctx } = this;
-        const { x, y } = this._pos(e);
         ctx.globalCompositeOperation = 'destination-out';
-        ctx.beginPath();
-        ctx.arc(x, y, 24, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
-    }
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.lineWidth = this.brush;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
 
-    _move(e) {
-        if (!this.scratching || this.revealed) return;
-        this._erase(e);
+        if (this.last) {
+            ctx.beginPath();
+            ctx.moveTo(this.last.x, this.last.y);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, this.brush / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalCompositeOperation = 'source-over';
+        this.last = { x, y };
     }
 
     _check() {
