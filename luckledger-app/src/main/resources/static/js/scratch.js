@@ -26,17 +26,55 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
     let moveCount = 0;
     let last = null;
 
-    // The PNG itself is the coating: draw it to fill the whole canvas.
+    const FALLBACK_COLOR = '#241c42'; // opaque coating used when the PNG can't be drawn
+
+    // True only once the image has genuinely decoded. A `complete` image that failed to load reports
+    // naturalWidth === 0, so checking both guards against treating a broken PNG as ready.
     const img = new Image();
+    function imageReady() {
+        return img.complete && img.naturalWidth > 0;
+    }
+
+    // The PNG itself is the coating: draw it to fill the whole canvas. Only ever called once we know the
+    // image actually decoded — otherwise the canvas would stay transparent and read as fully scratched.
     function paintCoating() {
         loaded = true;
         ctx.globalCompositeOperation = 'source-over';
         ctx.clearRect(0, 0, W, H);
         ctx.drawImage(img, 0, 0, W, H);
     }
-    img.onload = paintCoating;
+
+    // If the PNG 404s or fails to decode, lay down an opaque placeholder coating instead of leaving the
+    // canvas transparent. This keeps the 70% threshold honest (there is real coating to scratch through)
+    // and never fires onReveal by itself.
+    function paintFallback() {
+        loaded = true;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = FALLBACK_COLOR;
+        ctx.fillRect(0, 0, W, H);
+    }
+
+    // Draw the real coating if the image decoded, otherwise the opaque fallback.
+    function paint() {
+        if (imageReady()) {
+            paintCoating();
+        } else {
+            paintFallback();
+        }
+    }
+
+    img.onload = () => {
+        // Guard: only treat the PNG as the coating when it truly decoded; otherwise fall back.
+        if (imageReady()) {
+            paintCoating();
+        } else {
+            paintFallback();
+        }
+    };
+    img.onerror = paintFallback; // 404 / decode failure: never present as an already-scratched card
     img.src = pngPath;
-    if (img.complete && img.naturalWidth) paintCoating(); // already cached
+    if (imageReady()) paintCoating(); // already cached and decoded
 
     // Map client coords to canvas coords, accounting for CSS scaling.
     function _pos(e) {
@@ -67,16 +105,21 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         last = { x, y };
     }
 
-    // Sample the whole canvas; if >= 70% is transparent, clear everything and reveal once.
+    // Sample the canvas; if >= 70% is transparent, clear everything and reveal once.
     function _check() {
-        if (revealed) return;
+        if (revealed || !loaded) return; // no coating yet => never reveal
         const data = ctx.getImageData(0, 0, W, H).data;
         let clear = 0;
         let total = 0;
-        const step = 4 * 3; // every 3rd pixel, alpha channel only
-        for (let i = 3; i < data.length; i += step) {
-            total++;
-            if (data[i] < 128) clear++;
+        // Sample every 4th pixel in both x and y (alpha channel only) to cut per-check cost.
+        const rowBytes = W * 4;
+        for (let y = 0; y < H; y += 4) {
+            const rowStart = y * rowBytes;
+            for (let x = 0; x < W; x += 4) {
+                const alpha = data[rowStart + x * 4 + 3];
+                total++;
+                if (alpha < 128) clear++;
+            }
         }
         if (total > 0 && clear / total >= threshold) {
             ctx.globalCompositeOperation = 'source-over';
@@ -109,7 +152,7 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
             scratching = false;
             moveCount = 0;
             last = null;
-            if (img.complete && img.naturalWidth) paintCoating();
+            paint();
         },
     };
 }
