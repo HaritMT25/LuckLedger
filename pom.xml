@@ -59,6 +59,14 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Our junit.version (JUnit 5 / junit-bom) collides with spring-boot-dependencies'
+                 junit.version for the legacy JUnit 4 artifact, which Testcontainers pulls in
+                 transitively. Pin it to a real JUnit 4 release so resolution succeeds. -->
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>4.13.2</version>
+            </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
