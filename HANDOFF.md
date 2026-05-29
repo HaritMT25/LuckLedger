@@ -4,9 +4,12 @@ Date: 2026-05-29
 Branch: `frontend-fixes-and-shops` (pushed to `origin`, GitHub `HaritMT25/LuckLedger`)
 App: Spring Boot, runs on **http://localhost:8080** (Postgres via Docker Compose `luckledger-app/compose.yaml`).
 
-This session did frontend bug-fixes, a dealer→shop rework, books-only-via-shop, and several
-scratch-card iterations. The **scratch-card architecture is wrong** (see below) and is being reverted.
-A fresh session will reimplement it with correct instructions.
+LATEST (staff-engineer orchestration, 2026-05-29): executed `plans/fix-scratch-card` — **the
+scratch-card architecture is now CORRECT** (PNG-as-coating; see "What works"). Frontend-only, backend
+untouched. Merged into `frontend-fixes-and-shops` as `fae7e22` and pushed to origin.
+
+Earlier sessions did frontend bug-fixes, a dealer→shop rework, books-only-via-shop, and several
+scratch-card iterations (the wrong metallic-coating versions, since reverted).
 
 ---
 
@@ -69,25 +72,31 @@ mvn -pl luckledger-app spring-boot:run    # auto-starts Postgres via compose, se
 
 ---
 
-## What's BROKEN — the scratch-card architecture
+## What's FIXED — the scratch-card architecture (DONE this session)
 
-Current implementation is wrong and is being reverted:
-- Draws metallic rectangles/circles as a **coating layer on top of** the ticket.
-- Scratching reveals a number on an **opaque circle/rectangle**.
-- The ticket PNG art is treated as a passive **background decoration**.
+The CORRECT architecture is now implemented (`plans/fix-scratch-card`, merge `fae7e22`):
+- **The ticket PNG IS the coating.** The whole PNG is drawn onto a single `<canvas>` and erased via
+  `destination-out` compositing as you scratch.
+- Layering inside `.scratch-stage` (bottom→top):
+  - **Bottom:** `<div class="reveal-layer">` — dark `#1a1a2e` bg holding one absolutely-positioned
+    `<span class="value-label">` per scratch zone, centered on that zone.
+  - **Top:** `<canvas id="scratch" class="scratch-canvas">` carrying the ticket PNG (the coating).
+  - **Scratch:** round-cap `destination-out` brush with `lineTo` interpolation; whole-canvas
+    `getImageData` transparency sampled every ~10 move events; at ≥70% transparent → `clearRect` +
+    `onReveal` fires once (guarded). Robust to PNG load failure (paints a solid fallback coating,
+    no false auto-reveal).
+- Files changed (ONLY these three): `js/scratch.js`, `js/app.js` (scratch section), `css/style.css`
+  (scratch classes). Old `<img class="scratch-art">` and separate `<canvas id="reveal">` removed.
+  `config/scratch-zones.json` and all shops/ledger/router code preserved.
 
-### CORRECT architecture (to build in the fresh session — DO NOT build yet)
-- **The ticket PNG IS the coating.** The crystals/seals drawn in the PNG ARE what you scratch off.
-- Underneath the PNG is a **dark background with the revealed numbers/values**.
-- The PNG itself is erased via `destination-out` compositing.
-- Celestial: scratch a crystal → the crystal disappears, the number underneath appears.
-- Demon: scratch a seal → the golden talisman disappears, gold/silver/broken status appears.
-- Layering:
-  - **Bottom:** dark `<div>` with positioned number/value labels (per zone).
-  - **Top:** `<canvas>` with the **ticket PNG drawn onto it** as the scratch surface.
-  - **Scratch:** `destination-out` erases the PNG pixels in the brush path to reveal the labels below.
-- Keep: per-zone positions from `config/scratch-zones.json`, `lineTo` round-cap brush interpolation,
-  getImageData percentage tracking.
+### KNOWN LIMITATION — revealed numbers are client-generated, not the real grid
+The reveal API (`POST /api/tickets/{id}/reveal`) returns ONLY `{isWinner, prizeAmount}` — NO per-cell
+grid. So the numbers/values shown under the foil are generated **client-side** (deterministic per
+ticket via `seededRandom`/`numbersForTicket`, made consistent with the outcome: a winner shows a
+match, a loser never accidentally matches). The official result is always the banner. To show the
+TRUE engine grid numbers, a separate backend bead must re-expose the grid (see priority #2 below) —
+this was deliberately OUT of scope (`plans/fix-scratch-card/specs/no-touch-list.md` forbids backend
+changes; user confirmed frontend-only this session).
 
 ---
 
@@ -149,18 +158,37 @@ Original layered ticket art (PSDs + piece PNGs, for re-export if needed):
 
 ---
 
-## What needs fixing (priority order for the fresh session)
+## What needs fixing (priority order for the next session)
 
-1. **Rebuild the scratch card to the CORRECT architecture above** (PNG-as-coating erased via
-   destination-out; dark layer with real numbers/seals beneath; keep per-zone config + lineTo brush).
+1. ✅ **DONE — Rebuild the scratch card to the CORRECT architecture** (PNG-as-coating erased via
+   destination-out; dark `.reveal-layer` with positioned labels; lineTo brush; 70% threshold).
+   Merged `fae7e22`.
 2. **Re-expose the real grid** on `/api/tickets/{id}/reveal` (recover from `a082e3a`) so the numbers
-   beneath are the true engine values (consistent with win/loss; preserves "actual odds").
-3. **Re-apply the hand-tuned zone coordinates** (recover from `a082e3a`) or re-tune in the map tool so
-   the erased PNG regions line up with the crystals/seals.
-4. Optional polish discussed but not built: scratch dust/particles, coin cursor, scratch/win sounds,
-   reveal animation/confetti, holographic tilt.
+   beneath are the TRUE engine values, then have `app.js` place those instead of the client-generated
+   ones. Backend bead (was out of scope this session). Until done, see "KNOWN LIMITATION".
+3. **Verify/refine zone coordinates visually.** Zones in `config/scratch-zones.json` (16 Celestial,
+   8 Demon) were never checked against rendered pixels (no browser in-session). Open the app and
+   confirm each `.value-label` sits under its crystal/seal; tune in `/tools/map-zones.html` if off.
+4. **Manual visual test (never run in-session — Docker down, no browser).** Run the app, buy a
+   ticket, confirm: PNG shows as the surface, scratching erases it, gold numbers appear beneath, 70%
+   triggers the result banner, and dealer/book/ledger pages are unchanged.
+5. Optional polish: scratch dust/particles, coin cursor, scratch/win sounds, confetti, holographic
+   tilt. Minor: the empty-Scratch-tab "no ticket" message could be re-checked for copy.
 
 ## Known caveats
 - Visual/pixel feel was never verifiable in-session (no browser/headless rendering available here);
-  all scratch behavior was validated by code + API, not by looking at rendered pixels.
+  all scratch behavior was validated by code review + API, not by looking at rendered pixels.
+- **`mvn test` was NOT run this session — the Docker daemon was down (Testcontainers needs it).**
+  Mitigant: this change touched ZERO backend/Java/test files (frontend `.js`/`.css` only), so the
+  suite outcome is unaffected. Re-run `mvn test` once Docker is up to re-confirm green.
 - Demo RTPs (88%/30%) are the configured tier counts, not the mechanics' calibrated rates.
+
+## This session's git trail (scratch rebuild)
+- First attempt: an isolated worktree (`worktree-agent-ae27067c…`) was accidentally branched from the
+  WRONG base (`fd11ccf`/old main, missing the shops frontend + `scratch-zones.json`); merging it
+  conflicted and would have lost shops code. Aborted.
+- Redo (correct): branch `scratch-rebuild-v2` created from the real HEAD; the proven engine + scratch
+  section were grafted onto the current files (shops/ledger/router preserved). Committed `317290c`,
+  merged `--no-ff` into `frontend-fixes-and-shops` as `fae7e22`, pushed.
+- A stray worktree gitlink an earlier subagent committed onto the shared branch (`24840a8`) was
+  reverted (`af45e65`); net diff empty, no `160000` entries remain.
