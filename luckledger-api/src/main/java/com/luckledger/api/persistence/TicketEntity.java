@@ -1,0 +1,110 @@
+package com.luckledger.api.persistence;
+
+import com.luckledger.domain.mechanic.MechanicType;
+import com.luckledger.domain.scratch.TicketStatus;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import java.math.BigDecimal;
+import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+/**
+ * JPA mapping for a single ticket. The mechanic grid and themed grid are stored as {@code jsonb}; the
+ * predetermined {@code prizeAmount} is the source of truth at reveal (the grid is never re-evaluated).
+ * Reveal state ({@code revealed}, {@code revealedIsWinner}, {@code revealedPrize}) is filled in when
+ * the player scratches; it is null/false until then.
+ */
+@Entity
+@Table(name = "ticket")
+public class TicketEntity {
+
+    @Id
+    private UUID id;
+
+    @Column(name = "book_id")
+    private UUID bookId;
+
+    @Column(name = "game_id", nullable = false)
+    private UUID gameId;
+
+    @Column(name = "outcome_id", nullable = false)
+    private UUID outcomeId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "mechanic_type", nullable = false, length = 40)
+    private MechanicType mechanicType;
+
+    @Column(name = "prize_amount", nullable = false, precision = 19, scale = 4)
+    private BigDecimal prizeAmount;
+
+    @Column(name = "position_in_book")
+    private Integer positionInBook;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TicketStatus status;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(nullable = false, columnDefinition = "jsonb")
+    private GridCodec.GridDto grid;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "skinned_grid", nullable = false, columnDefinition = "jsonb")
+    private GridCodec.ThemedGridDto skinnedGrid;
+
+    @Column(nullable = false)
+    private boolean revealed;
+
+    @Column(name = "revealed_is_winner")
+    private Boolean revealedIsWinner;
+
+    @Column(name = "revealed_prize", precision = 19, scale = 4)
+    private BigDecimal revealedPrize;
+
+    protected TicketEntity() {}
+
+    public TicketEntity(UUID id, UUID bookId, UUID gameId, UUID outcomeId, MechanicType mechanicType,
+            BigDecimal prizeAmount, Integer positionInBook, TicketStatus status, GridCodec.GridDto grid,
+            GridCodec.ThemedGridDto skinnedGrid) {
+        this.id = id;
+        this.bookId = bookId;
+        this.gameId = gameId;
+        this.outcomeId = outcomeId;
+        this.mechanicType = mechanicType;
+        this.prizeAmount = prizeAmount;
+        this.positionInBook = positionInBook;
+        this.status = status;
+        this.grid = grid;
+        this.skinnedGrid = skinnedGrid;
+        this.revealed = false;
+    }
+
+    public UUID getId() { return id; }
+    public UUID getBookId() { return bookId; }
+    public UUID getGameId() { return gameId; }
+    public UUID getOutcomeId() { return outcomeId; }
+    public MechanicType getMechanicType() { return mechanicType; }
+    public BigDecimal getPrizeAmount() { return prizeAmount; }
+    public Integer getPositionInBook() { return positionInBook; }
+    public TicketStatus getStatus() { return status; }
+    public GridCodec.GridDto getGrid() { return grid; }
+    public GridCodec.ThemedGridDto getSkinnedGrid() { return skinnedGrid; }
+    public boolean isRevealed() { return revealed; }
+    public Boolean getRevealedIsWinner() { return revealedIsWinner; }
+    public BigDecimal getRevealedPrize() { return revealedPrize; }
+
+    public void setStatus(TicketStatus status) { this.status = status; }
+
+    /** Marks the ticket revealed and records the outcome. Idempotent callers should check first. */
+    public void markRevealed(boolean isWinner, BigDecimal prize) {
+        this.revealed = true;
+        this.revealedIsWinner = isWinner;
+        this.revealedPrize = prize;
+        this.status = TicketStatus.REVEALED;
+    }
+}

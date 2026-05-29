@@ -1,7 +1,5 @@
 package com.luckledger.api.persistence;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.luckledger.domain.generation.theme.ThemedCell;
 import com.luckledger.domain.generation.theme.ThemedGrid;
 import com.luckledger.domain.generation.theme.ThemedSymbol;
@@ -11,28 +9,30 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Serializes mechanic and themed grids to a stable JSON shape for storage in {@code jsonb} columns.
+ * Converts mechanic and themed grids to a stable, JSON-friendly DTO shape for storage in {@code jsonb}
+ * columns ({@link TicketEntity#getGrid()} / {@link TicketEntity#getSkinnedGrid()}). Hibernate
+ * (via {@code @JdbcTypeCode(SqlTypes.JSON)}) serializes these records into the column and the API
+ * serves the themed grid to the frontend as-is.
  *
- * <p>Serialize-only by design: the mechanic grid is stored for audit/display, and a reveal trusts the
- * ticket's persisted {@code prize_amount} (already verified at generation time) rather than
- * re-evaluating a deserialized grid — so no fragile grid deserialization is needed. The themed grid
- * is served to the frontend as-is.
+ * <p>By design a reveal trusts the ticket's persisted {@code prize_amount} (already verified at
+ * generation time) rather than reconstructing a domain {@link Grid} from this DTO and re-evaluating
+ * it — so these records are for storage and display only; no domain grid is ever rebuilt from them.
  */
 public final class GridCodec {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
     private GridCodec() {}
 
-    public static String toJson(Grid grid) {
+    /** Maps a mechanic grid to its storage DTO. */
+    public static GridDto toDto(Grid grid) {
         List<CellDto> cells = new ArrayList<>();
         for (Cell cell : grid.getAllCells()) {
             cells.add(new CellDto(cell.position().row(), cell.position().col(), cell.symbol(), cell.prizeValue()));
         }
-        return write(new GridDto(grid.size().name(), grid.size().dimension(), cells));
+        return new GridDto(grid.size().name(), grid.size().dimension(), cells);
     }
 
-    public static String toJson(ThemedGrid grid) {
+    /** Maps a themed grid to its storage DTO. */
+    public static ThemedGridDto toDto(ThemedGrid grid) {
         List<ThemedCellDto> cells = new ArrayList<>();
         for (ThemedCell cell : grid.getAllCells()) {
             ThemedSymbol s = cell.themedSymbol();
@@ -44,15 +44,7 @@ public final class GridCodec {
                     s.displayImageUrl(),
                     s.displayLabel()));
         }
-        return write(new ThemedGridDto(grid.size().name(), grid.size().dimension(), cells));
-    }
-
-    private static String write(Object dto) {
-        try {
-            return MAPPER.writeValueAsString(dto);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("failed to serialize grid to JSON", e);
-        }
+        return new ThemedGridDto(grid.size().name(), grid.size().dimension(), cells);
     }
 
     public record GridDto(String size, int dimension, List<CellDto> cells) {}

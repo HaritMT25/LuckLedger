@@ -2,6 +2,7 @@ package com.luckledger.distribution;
 
 import com.luckledger.domain.generation.TicketCard;
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -45,6 +46,21 @@ public final class TicketBook {
 
     public java.util.UUID poolContractId() {
         return poolContractId;
+    }
+
+    /**
+     * The book's tickets in sale order (ticket #1 at index 0). Unmodifiable.
+     *
+     * <p>Exposed so persistence can map each ticket to its {@code (book, position_in_book)} without
+     * mutating the sale cursor; it does not advance {@link #getNextTicket()} or affect depletion.
+     */
+    public List<TicketCard> tickets() {
+        return Collections.unmodifiableList(tickets);
+    }
+
+    /** How many tickets of this book have already been sold (the sale cursor). */
+    public int nextIndex() {
+        return nextIndex;
     }
 
     public int getTotalTickets() {
