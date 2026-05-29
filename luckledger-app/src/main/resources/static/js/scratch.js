@@ -1,10 +1,14 @@
-/* Scratch card canvas engine — the ticket PNG IS the coating.
+/* Scratch card canvas engine — the ticket PNG IS the coating, scratched off per zone.
  *
- * The full ticket PNG is drawn onto this canvas; it is the silver foil. The player scratches anywhere on
- * it: erasing with destination-out lifts the PNG pixels, uncovering the dark reveal layer (with its
- * number labels) sitting in the DOM beneath the canvas. There is no per-zone clipping — the whole PNG is
- * the coating. When ~70% of the canvas has been scratched away, everything is cleared and `onReveal`
- * fires exactly once. */
+ * The full ticket PNG is drawn onto this canvas; it is the silver foil. Scratching is confined to the
+ * calibrated zones in config/scratch-zones.json: a pointer only lifts coating within the zone it is
+ * currently inside (each stroke is clipped to that zone's circle/rect), so the spaces between zones,
+ * the title, badges and the centre demon stay covered. Each zone tracks its own scratched fraction and
+ * clears independently once ~70% of *its* coating is gone, uncovering the reveal layer beneath:
+ *   - CELESTIAL_FORTUNE → the number labels app.js renders into #reveal-layer
+ *   - DEMON_SEAL        → gold / silver / broken seal tiles (this file swaps app.js's labels for them)
+ * When every zone has revealed, `onReveal` fires exactly once. If the zone config can't be matched the
+ * engine falls back to the legacy whole-surface scratch so the card still works. */
 
 /**
  * Initialise a scratch surface on a canvas, using a ticket PNG as the full coating.
@@ -27,6 +31,127 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
     let last = null;
 
     const FALLBACK_COLOR = '#241c42'; // opaque coating used when the PNG can't be drawn
+
+    // ----- Per-zone scratch model ---------------------------------------------------------------
+    let zones = null;          // array of scratchable zones once loaded; null while loading
+    let zonesFailed = false;   // true if config missing/unmatched => fall back to whole-surface scratch
+    let mechanic = null;       // 'CELESTIAL_FORTUNE' | 'DEMON_SEAL' | ...
+    let lastZoneId = null;     // zone the last stroke was in, so the line never bridges across a gap
+    const revealedZones = new Set();
+
+    // Tiny deterministic RNG (fnv1a seed → mulberry32) so a ticket's seal reveals are stable on redraw.
+    function _rng(seedStr) {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < seedStr.length; i++) { h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
+        return function () { h += 0x6D2B79F5; let t = Math.imul(h ^ (h >>> 15), 1 | h); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    }
+
+    // Zone geometry in canvas pixels. Circles: cx/cy fractions of W/H, r a fraction of W. Rects:
+    // x/w fractions of W, y/h fractions of H. (Matches the scratch-zones.json note.)
+    function _bounds(z) {
+        if (z.shape === 'circle') { const r = z.r * W; return { x: z.cx * W - r, y: z.cy * H - r, w: r * 2, h: r * 2 }; }
+        return { x: z.x * W, y: z.y * H, w: z.w * W, h: z.h * H };
+    }
+    // The scratch zone under a canvas point, or null if the point is between/outside zones.
+    function _zoneAt(p) {
+        if (!zones) return null;
+        for (const z of zones) {
+            if (z.shape === 'circle') {
+                const dx = p.x - z.cx * W, dy = p.y - z.cy * H, r = z.r * W;
+                if (dx * dx + dy * dy <= r * r) return z;
+            } else if (p.x >= z.x * W && p.x <= (z.x + z.w) * W && p.y >= z.y * H && p.y <= (z.y + z.h) * H) {
+                return z;
+            }
+        }
+        return null;
+    }
+    // Trace a zone's outline as the current path (caller clips or fills it).
+    function _zonePath(z) {
+        ctx.beginPath();
+        if (z.shape === 'circle') ctx.arc(z.cx * W, z.cy * H, z.r * W, 0, Math.PI * 2);
+        else ctx.rect(z.x * W, z.y * H, z.w * W, z.h * H);
+    }
+    // Fraction (0..1) of a single zone's coating that has been scratched away.
+    function _zoneClearFraction(z) {
+        const b = _bounds(z);
+        const bx = Math.max(0, Math.floor(b.x)), by = Math.max(0, Math.floor(b.y));
+        const bw = Math.min(W - bx, Math.ceil(b.w)), bh = Math.min(H - by, Math.ceil(b.h));
+        if (bw <= 0 || bh <= 0) return 0;
+        const data = ctx.getImageData(bx, by, bw, bh).data;
+        const cxp = z.cx * W, cyp = z.cy * H, rp2 = (z.r * W) * (z.r * W);
+        let clear = 0, total = 0;
+        for (let yy = 0; yy < bh; yy += 2) {
+            for (let xx = 0; xx < bw; xx += 2) {
+                if (z.shape === 'circle') {
+                    const dx = bx + xx - cxp, dy = by + yy - cyp;
+                    if (dx * dx + dy * dy > rp2) continue; // only count pixels inside the circle
+                }
+                total++;
+                if (data[(yy * bw + xx) * 4 + 3] < 128) clear++;
+            }
+        }
+        return total ? clear / total : 0;
+    }
+    // Lift a zone's remaining coating and mark it revealed; fire onReveal once every zone is open.
+    function _revealZone(z) {
+        if (revealedZones.has(z.id)) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        _zonePath(z);
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        ctx.fill();
+        ctx.restore();
+        revealedZones.add(z.id);
+        if (zones.length && revealedZones.size >= zones.length && !revealed) {
+            revealed = true;
+            onReveal();
+        }
+    }
+
+    // Demon Seal reveals SEAL ICONS (gold / silver / broken), not numbers. app.js seeds #reveal-layer
+    // with one label per zone ('★' for every zone on a winning ticket, otherwise numbers); we read that
+    // to stay consistent with win/loss, then replace the labels with seal-icon tiles at each zone centre.
+    function _renderSealReveals() {
+        const layer = document.getElementById('reveal-layer');
+        if (!layer || !zones) return;
+        const labels = [...layer.querySelectorAll('.value-label')];
+        const won = labels.length > 0 && labels.every((s) => s.textContent.trim() === '★');
+        const rng = _rng((labels.map((s) => s.textContent).join('|') || pngPath) + ':seal');
+        const pool = won ? ['GOLD', 'GOLD', 'SILVER'] : ['SILVER', 'BROKEN', 'BROKEN'];
+        const ICON = { GOLD: '✦', SILVER: '✧', BROKEN: '✗' };
+        layer.innerHTML = '';
+        zones.forEach((z, i) => {
+            const cx = z.shape === 'circle' ? z.cx : z.x + z.w / 2;
+            const cy = z.shape === 'circle' ? z.cy : z.y + z.h / 2;
+            const kind = (won && i === 0) ? 'GOLD' : pool[Math.floor(rng() * pool.length)]; // guarantee gold on a win
+            const tile = document.createElement('div');
+            tile.className = 'seal-reveal ' + kind.toLowerCase();
+            tile.style.left = `${cx * 100}%`;
+            tile.style.top = `${cy * 100}%`;
+            tile.innerHTML = `<span class="seal-icon">${ICON[kind]}</span><span class="seal-label">${kind}</span>`;
+            layer.appendChild(tile);
+        });
+    }
+
+    // Identify the mechanic from the ticket PNG filename, then load that ticket's scratch zones.
+    function _loadZones() {
+        fetch('config/scratch-zones.json')
+            .then((r) => r.json())
+            .then((cfg) => {
+                const tickets = (cfg && cfg.tickets) || {};
+                const file = pngPath.split('/').pop();
+                for (const [key, t] of Object.entries(tickets)) {
+                    if (t.image && t.image.split('/').pop() === file) {
+                        mechanic = key;
+                        zones = (t.zones || []).filter((z) => z.scratch && z.shape !== 'path');
+                        break;
+                    }
+                }
+                if (!zones) { zonesFailed = true; return; } // unmatched PNG => legacy whole-surface scratch
+                if (mechanic === 'DEMON_SEAL') _renderSealReveals();
+            })
+            .catch(() => { zonesFailed = true; });
+    }
 
     // True only once the image has genuinely decoded. A `complete` image that failed to load reports
     // naturalWidth === 0, so checking both guards against treating a broken PNG as ready.
@@ -75,6 +200,7 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
     img.onerror = paintFallback; // 404 / decode failure: never present as an already-scratched card
     img.src = pngPath;
     if (imageReady()) paintCoating(); // already cached and decoded
+    _loadZones(); // resolve mechanic + zones (async); scratching falls back to whole-surface until ready
 
     // Map client coords to canvas coords, accounting for CSS scaling.
     function _pos(e) {
@@ -85,8 +211,12 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         };
     }
 
-    // Erase a round dot and, while dragging, a continuous fat line from the previous point.
-    function _stroke({ x, y }) {
+    // Erase a round dot and, while dragging, a continuous fat line from the previous point. When `zone`
+    // is given the erase is clipped to that zone's outline, so only its coating lifts; without a zone
+    // (legacy fallback) the whole surface erases.
+    function _stroke({ x, y }, zone) {
+        ctx.save();
+        if (zone) { _zonePath(zone); ctx.clip(); }
         ctx.globalCompositeOperation = 'destination-out';
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -102,30 +232,41 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         ctx.beginPath();
         ctx.arc(x, y, brush / 2, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
         last = { x, y };
     }
 
-    // Sample the canvas; if >= 70% is transparent, clear everything and reveal once.
-    function _check() {
+    // Reveal logic. With zones loaded, each zone clears independently once ~70% of *its* coating is
+    // gone (passing `zone` checks just that one — cheap, for the active stroke). Without zones (config
+    // unmatched) it falls back to the legacy whole-surface 70% check that clears everything at once.
+    function _check(zone) {
         if (revealed || !loaded) return; // no coating yet => never reveal
-        const data = ctx.getImageData(0, 0, W, H).data;
-        let clear = 0;
-        let total = 0;
-        // Sample every 4th pixel in both x and y (alpha channel only) to cut per-check cost.
-        const rowBytes = W * 4;
-        for (let y = 0; y < H; y += 4) {
-            const rowStart = y * rowBytes;
-            for (let x = 0; x < W; x += 4) {
-                const alpha = data[rowStart + x * 4 + 3];
-                total++;
-                if (alpha < 128) clear++;
+        if (!zones && !zonesFailed) return; // zones still loading: nothing to check yet
+        if (zonesFailed) {
+            const data = ctx.getImageData(0, 0, W, H).data;
+            let clear = 0;
+            let total = 0;
+            // Sample every 4th pixel in both x and y (alpha channel only) to cut per-check cost.
+            const rowBytes = W * 4;
+            for (let y = 0; y < H; y += 4) {
+                const rowStart = y * rowBytes;
+                for (let x = 0; x < W; x += 4) {
+                    const alpha = data[rowStart + x * 4 + 3];
+                    total++;
+                    if (alpha < 128) clear++;
+                }
             }
+            if (total > 0 && clear / total >= threshold) {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.clearRect(0, 0, W, H);
+                revealed = true;
+                onReveal();
+            }
+            return;
         }
-        if (total > 0 && clear / total >= threshold) {
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.clearRect(0, 0, W, H);
-            revealed = true;
-            onReveal();
+        for (const z of (zone ? [zone] : zones)) {
+            if (revealedZones.has(z.id)) continue;
+            if (_zoneClearFraction(z) >= threshold) _revealZone(z);
         }
     }
 
@@ -134,17 +275,32 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         scratching = true;
         last = null;
         try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* unsupported */ }
-        _stroke(_pos(e));
+        const p = _pos(e);
+        if (zonesFailed) { lastZoneId = null; _stroke(p, null); return; } // config unmatched: whole-surface
+        if (!zones) return; // zones still loading: wait rather than scratch the whole (unclipped) surface
+        const zone = _zoneAt(p);
+        lastZoneId = zone ? zone.id : null;
+        if (zone) _stroke(p, zone); // outside any zone: nothing scratches
     });
     canvas.addEventListener('pointermove', (e) => {
         if (!scratching || revealed) return;
-        _stroke(_pos(e));
-        if (++moveCount % 10 === 0) _check();
+        const p = _pos(e);
+        if (zonesFailed) { // config unmatched: whole-surface scratch
+            _stroke(p, null);
+            if (++moveCount % 10 === 0) _check();
+            return;
+        }
+        if (!zones) return; // zones still loading
+        const zone = _zoneAt(p);
+        if (!zone) { last = null; lastZoneId = null; return; } // between zones: don't scratch, break the line
+        if (zone.id !== lastZoneId) { last = null; lastZoneId = zone.id; } // entered a new zone: no bridging stroke
+        _stroke(p, zone);
+        if (++moveCount % 6 === 0) _check(zone);
     });
-    const end = () => { if (!scratching) return; scratching = false; last = null; _check(); };
+    const end = () => { if (!scratching) return; scratching = false; last = null; lastZoneId = null; _check(); };
     canvas.addEventListener('pointerup', end);
-    canvas.addEventListener('pointercancel', () => { scratching = false; last = null; });
-    canvas.addEventListener('pointerleave', () => { scratching = false; last = null; });
+    canvas.addEventListener('pointercancel', () => { scratching = false; last = null; lastZoneId = null; });
+    canvas.addEventListener('pointerleave', () => { scratching = false; last = null; lastZoneId = null; });
 
     return {
         reset() {
@@ -152,7 +308,9 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
             scratching = false;
             moveCount = 0;
             last = null;
-            paint();
+            lastZoneId = null;
+            revealedZones.clear();
+            paint(); // re-coat; the reveal-layer (numbers or seal tiles) stays as it was rendered
         },
     };
 }
