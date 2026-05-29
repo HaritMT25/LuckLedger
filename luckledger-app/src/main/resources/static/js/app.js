@@ -209,7 +209,7 @@ async function renderScratch() {
         return;
     }
     const art = TICKET_ART[t.mechanic] || TICKET_ART.CELESTIAL_FORTUNE;
-    // Three layers (bottom→top): ticket art · reveal canvas (real numbers/seals) · metallic coating.
+    // Layers (bottom→top): ticket art · reveal canvas (hidden numbers) · foil canvas (the symbols).
     view.innerHTML = `
         <div class="section-title"><h2>Scratch your ticket</h2>
             <span class="hint">${t.mechanic.replace('_', ' ')}</span></div>
@@ -220,7 +220,7 @@ async function renderScratch() {
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
-            <p class="scratch-instructions">Scratch the silver panels to reveal what's underneath.</p>
+            <p class="scratch-instructions">Scratch the coins and crystals off to reveal the numbers underneath.</p>
             <button class="btn secondary" id="buy-another" hidden>Buy another</button>
         </div>`;
 
@@ -230,11 +230,11 @@ async function renderScratch() {
 
     const foil = document.getElementById('scratch');
     const reveal = document.getElementById('reveal');
-    const stage = view.querySelector('.scratch-stage');
-    if (!foil || !reveal) return; // navigated away while loading
+    const artImg = document.querySelector('.scratch-art');
+    if (!foil || !reveal || !artImg) return; // navigated away while loading
 
-    // Reveal the outcome up front (server-side; idempotent) so the hidden numbers are the real ones.
-    // The result banner / celebration is held back until the player has scratched enough.
+    // Reveal the outcome up front (server-side; idempotent) so the hidden numbers are consistent with
+    // win/loss. The result banner is held back until the player has scratched everything.
     let outcome;
     try {
         outcome = await Api.reveal(t.ticketId, state.player.playerId);
@@ -242,64 +242,18 @@ async function renderScratch() {
         outcome = await Api.ticket(t.ticketId).catch(() => ({ isWinner: false, prizeAmount: 0 }));
     }
 
-    // Draw the real hidden symbols (from the engine grid) on the reveal layer, under the coating.
+    // Draw the real hidden symbols (from the engine grid) on the reveal layer, under the foil.
     const values = buildRevealValues(zones, t.mechanic, t.ticketId, outcome);
     drawHiddenNumbers(reveal, zones, values);
 
-    const won = !!(outcome && outcome.isWinner) && Number(outcome.prizeAmount || 0) > 0;
-    const onReveal = async () => {
-        revealFlash(stage);
-        if (won) launchConfetti(stage);
+    const onAllScratched = async () => {
         showResult(outcome);
         await refreshPlayer();
     };
-    new ScratchCard(foil, zones, onReveal);
-}
-
-/** A quick gold shine sweep across the ticket when the coating clears. */
-function revealFlash(stage) {
-    if (!stage) return;
-    const flash = document.createElement('div');
-    flash.className = 'reveal-flash';
-    stage.appendChild(flash);
-    setTimeout(() => flash.remove(), 700);
-}
-
-/** A short confetti burst over the ticket on a win (vanilla canvas particles, no assets). */
-function launchConfetti(stage) {
-    if (!stage) return;
-    const canvas = document.createElement('canvas');
-    canvas.className = 'confetti';
-    const rect = stage.getBoundingClientRect();
-    canvas.width = rect.width; canvas.height = rect.height;
-    stage.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    const colors = ['#f3c969', '#8b5cf6', '#4ade80', '#ffffff', '#e0796f'];
-    const parts = Array.from({ length: 90 }, (_, i) => ({
-        x: canvas.width / 2, y: canvas.height * 0.42,
-        vx: (((i * 73) % 100) / 100 - 0.5) * 9,
-        vy: -6 - (((i * 31) % 100) / 100) * 7,
-        w: 4 + (i % 4) * 2, h: 6 + (i % 3) * 3,
-        rot: i, vr: (((i * 17) % 100) / 100 - 0.5) * 0.5,
-        color: colors[i % colors.length],
-    }));
-    let frame = 0;
-    const tick = () => {
-        frame++;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        for (const p of parts) {
-            p.vy += 0.28; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
-            ctx.save();
-            ctx.translate(p.x, p.y); ctx.rotate(p.rot);
-            ctx.globalAlpha = Math.max(0, 1 - frame / 90);
-            ctx.fillStyle = p.color;
-            ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
-            ctx.restore();
-        }
-        if (frame < 90) requestAnimationFrame(tick);
-        else canvas.remove();
-    };
-    requestAnimationFrame(tick);
+    // The foil is lifted from the ticket art, so wait until the image has decoded.
+    const start = () => new ScratchCard(foil, artImg, zones, onAllScratched);
+    if (artImg.complete && artImg.naturalWidth) start();
+    else artImg.addEventListener('load', start, { once: true });
 }
 
 // ---- hidden numbers (the reveal layer under the foil) ----------------------
@@ -407,7 +361,7 @@ function drawHiddenNumbers(canvas, zones, values) {
 function showResult(outcome) {
     const banner = document.getElementById('banner');
     const won = outcome.isWinner && Number(outcome.prizeAmount) > 0;
-    banner.className = 'result-banner show ' + (won ? 'win' : 'lose');
+    banner.className = 'result-banner ' + (won ? 'win' : 'lose');
     banner.textContent = won ? `🎉 WIN ${money(outcome.prizeAmount)} coins!` : 'No win this time.';
     banner.hidden = false;
     const again = document.getElementById('buy-another');
