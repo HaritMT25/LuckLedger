@@ -1,189 +1,158 @@
-/* Canvas scratch surface — the FOIL layer of a real lottery ticket.
+/* Scratch card canvas engine — the ticket PNG IS the coating.
  *
- * The ticket art is a sibling <img>; a "reveal" canvas sits above it carrying the hidden numbers; and
- * THIS canvas sits on top, painting each scratch zone (coin circles, crystal cells, talismans) with the
- * SYMBOL ITSELF, lifted pixel-for-pixel from the ticket art. That symbol is the scratch coating — just
- * like the silver diamond on a real ticket. Erasing it with destination-out uncovers the number on the
- * reveal canvas below.
- *
- * Each zone is INDEPENDENT: it tracks its own scratched fraction and snaps fully clear only ITSELF once
- * past the threshold — scratching one symbol never uncovers the others. When every zone has been
- * cleared, `onReveal` fires once. */
+ * The full ticket PNG is drawn onto this canvas; it is the silver foil. The player scratches anywhere on
+ * it: erasing with destination-out lifts the PNG pixels, uncovering the dark reveal layer (with its
+ * number labels) sitting in the DOM beneath the canvas. There is no per-zone clipping — the whole PNG is
+ * the coating. When ~70% of the canvas has been scratched away, everything is cleared and `onReveal`
+ * fires exactly once. */
 
-class ScratchCard {
-    /**
-     * @param canvas  foil canvas (its width/height set the working resolution)
-     * @param img     the loaded ticket <img>, source of the per-zone symbol coating
-     * @param zones   scratch zones in image fractions: {shape:'circle',cx,cy,r} | {shape:'rect',x,y,w,h}
-     * @param onReveal called once when every zone has been scratched clear
-     */
-    constructor(canvas, img, zones, onReveal) {
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d', { willReadFrequently: true });
-        this.img = img;
-        this.zones = (zones && zones.length) ? zones : [{ shape: 'rect', x: 0, y: 0, w: 1, h: 1 }];
-        this.onReveal = onReveal;
-        this.revealed = false;
-        this.scratching = false;
-        this.zoneThreshold = 0.55; // fraction of a single zone cleared before it snaps fully revealed
-        this.brush = 30;
-        this.W = canvas.width;
-        this.H = canvas.height;
-        this.last = null;
+/**
+ * Initialise a scratch surface on a canvas, using a ticket PNG as the full coating.
+ * @param {HTMLCanvasElement} canvas the scratch canvas
+ * @param {string} pngPath path to the ticket PNG (the coating drawn over the dark reveal layer)
+ * @param {Function} onReveal invoked exactly once when the reveal threshold (70%) is reached
+ * @returns {{reset: Function}} a small controller; call reset() to re-coat and allow scratching again
+ */
+function initScratch(canvas, pngPath, onReveal = () => {}) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const W = canvas.width;
+    const H = canvas.height;
+    const brush = Math.max(28, Math.round(W * 0.08)); // ~ a fingertip/coin on a 360px-wide canvas
+    const threshold = 0.7;
 
-        this._coat();
-        this._bind();
+    let loaded = false;
+    let revealed = false;
+    let scratching = false;
+    let moveCount = 0;
+    let last = null;
+
+    const FALLBACK_COLOR = '#241c42'; // opaque coating used when the PNG can't be drawn
+
+    // True only once the image has genuinely decoded. A `complete` image that failed to load reports
+    // naturalWidth === 0, so checking both guards against treating a broken PNG as ready.
+    const img = new Image();
+    function imageReady() {
+        return img.complete && img.naturalWidth > 0;
     }
 
-    /** Paints the symbol coating over each zone and records each zone's initial coated area. */
-    _coat() {
-        const { ctx, W, H } = this;
+    // The PNG itself is the coating: draw it to fill the whole canvas. Only ever called once we know the
+    // image actually decoded — otherwise the canvas would stay transparent and read as fully scratched.
+    function paintCoating() {
+        loaded = true;
         ctx.globalCompositeOperation = 'source-over';
         ctx.clearRect(0, 0, W, H);
-        for (const z of this.zones) this._paintZone(z);
-
-        const data = ctx.getImageData(0, 0, W, H).data;
-        this.state = this.zones.map((z) => {
-            const bb = this._bbox(z);
-            return { z, bb, initial: Math.max(1, this._coatedIn(data, bb)), done: false };
-        });
+        ctx.drawImage(img, 0, 0, W, H);
     }
 
-    _paintZone(z) {
-        const { ctx } = this;
-        const bb = this._bbox(z);
-        ctx.save();
-        ctx.beginPath();
-        if (z.shape === 'circle') ctx.arc(z.cx * this.W, z.cy * this.H, z.r * this.W, 0, Math.PI * 2);
-        else this._roundRectPath(bb.x, bb.y, bb.w, bb.h, Math.min(bb.w, bb.h) * 0.18);
-        ctx.clip();
+    // If the PNG 404s or fails to decode, lay down an opaque placeholder coating instead of leaving the
+    // canvas transparent. This keeps the 70% threshold honest (there is real coating to scratch through)
+    // and never fires onReveal by itself.
+    function paintFallback() {
+        loaded = true;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = FALLBACK_COLOR;
+        ctx.fillRect(0, 0, W, H);
+    }
 
-        if (this.img && this.img.naturalWidth) {
-            // The coating IS the symbol — the exact coin/crystal/talisman pixels from the ticket art.
-            const s = this._srcRect(z);
-            ctx.drawImage(this.img, s.x, s.y, s.w, s.h, bb.x, bb.y, bb.w, bb.h);
+    // Draw the real coating if the image decoded, otherwise the opaque fallback.
+    function paint() {
+        if (imageReady()) {
+            paintCoating();
         } else {
-            ctx.fillStyle = 'rgba(20,16,30,0.7)'; // fallback only if the art failed to load
-            ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+            paintFallback();
         }
-        ctx.restore();
     }
 
-    /** Source rectangle (natural image pixels) for a zone — what to lift from the ticket art. */
-    _srcRect(z) {
-        const nw = this.img.naturalWidth, nh = this.img.naturalHeight;
-        if (z.shape === 'circle') {
-            const rp = z.r * nw;
-            return { x: z.cx * nw - rp, y: z.cy * nh - rp, w: rp * 2, h: rp * 2 };
+    img.onload = () => {
+        // Guard: only treat the PNG as the coating when it truly decoded; otherwise fall back.
+        if (imageReady()) {
+            paintCoating();
+        } else {
+            paintFallback();
         }
-        return { x: z.x * nw, y: z.y * nh, w: z.w * nw, h: z.h * nh };
-    }
+    };
+    img.onerror = paintFallback; // 404 / decode failure: never present as an already-scratched card
+    img.src = pngPath;
+    if (imageReady()) paintCoating(); // already cached and decoded
 
-    _bbox(z) {
-        const { W, H } = this;
-        if (z.shape === 'circle') {
-            return { x: z.cx * W - z.r * W, y: z.cy * H - z.r * W, w: z.r * 2 * W, h: z.r * 2 * W };
-        }
-        return { x: z.x * W, y: z.y * H, w: z.w * W, h: z.h * H };
-    }
-
-    _roundRectPath(x, y, w, h, r) {
-        const ctx = this.ctx;
-        ctx.moveTo(x + r, y);
-        ctx.arcTo(x + w, y, x + w, y + h, r);
-        ctx.arcTo(x + w, y + h, x, y + h, r);
-        ctx.arcTo(x, y + h, x, y, r);
-        ctx.arcTo(x, y, x + w, y, r);
-        ctx.closePath();
-    }
-
-    _bind() {
-        const c = this.canvas;
-        c.addEventListener('pointerdown', (e) => {
-            if (this.revealed) return;
-            this.scratching = true;
-            this.last = null;
-            c.setPointerCapture(e.pointerId);
-            this._stroke(this._pos(e));
-        });
-        c.addEventListener('pointermove', (e) => {
-            if (!this.scratching || this.revealed) return;
-            this._stroke(this._pos(e));
-        });
-        const end = () => { this.scratching = false; this.last = null; this._check(); };
-        c.addEventListener('pointerup', end);
-        c.addEventListener('pointercancel', end);
-        c.addEventListener('pointerleave', () => { this.scratching = false; this.last = null; });
-    }
-
-    _pos(e) {
-        const r = this.canvas.getBoundingClientRect();
+    // Map client coords to canvas coords, accounting for CSS scaling.
+    function _pos(e) {
+        const r = canvas.getBoundingClientRect();
         return {
-            x: (e.clientX - r.left) * (this.W / r.width),
-            y: (e.clientY - r.top) * (this.H / r.height),
+            x: (e.clientX - r.left) * (W / r.width),
+            y: (e.clientY - r.top) * (H / r.height),
         };
     }
 
-    /** Erases a round dot and, if dragging, a fat line from the previous point — coating only. */
-    _stroke({ x, y }) {
-        const { ctx } = this;
+    // Erase a round dot and, while dragging, a continuous fat line from the previous point.
+    function _stroke({ x, y }) {
         ctx.globalCompositeOperation = 'destination-out';
-        ctx.fillStyle = ctx.strokeStyle = 'rgba(0,0,0,1)';
-        ctx.lineWidth = this.brush;
-        ctx.lineCap = ctx.lineJoin = 'round';
-        if (this.last) {
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = brush;
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        if (last) {
             ctx.beginPath();
-            ctx.moveTo(this.last.x, this.last.y);
+            ctx.moveTo(last.x, last.y);
             ctx.lineTo(x, y);
             ctx.stroke();
         }
         ctx.beginPath();
-        ctx.arc(x, y, this.brush / 2, 0, Math.PI * 2);
+        ctx.arc(x, y, brush / 2, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
-        this.last = { x, y };
+        last = { x, y };
     }
 
-    /** Per-zone progress: a zone that crosses its threshold snaps fully clear — only itself. */
-    _check() {
-        if (this.revealed) return;
-        const data = this.ctx.getImageData(0, 0, this.W, this.H).data;
-        for (const st of this.state) {
-            if (st.done) continue;
-            const cur = this._coatedIn(data, st.bb);
-            if ((st.initial - cur) / st.initial >= this.zoneThreshold) {
-                st.done = true;
-                this._clearZone(st.z); // reveal this zone in full, leaving the others coated
+    // Sample the canvas; if >= 70% is transparent, clear everything and reveal once.
+    function _check() {
+        if (revealed || !loaded) return; // no coating yet => never reveal
+        const data = ctx.getImageData(0, 0, W, H).data;
+        let clear = 0;
+        let total = 0;
+        // Sample every 4th pixel in both x and y (alpha channel only) to cut per-check cost.
+        const rowBytes = W * 4;
+        for (let y = 0; y < H; y += 4) {
+            const rowStart = y * rowBytes;
+            for (let x = 0; x < W; x += 4) {
+                const alpha = data[rowStart + x * 4 + 3];
+                total++;
+                if (alpha < 128) clear++;
             }
         }
-        if (this.state.every((s) => s.done)) {
-            this.revealed = true;
-            this.onReveal();
+        if (total > 0 && clear / total >= threshold) {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.clearRect(0, 0, W, H);
+            revealed = true;
+            onReveal();
         }
     }
 
-    /** Coated (alpha-bearing) sample count within a bounding box. */
-    _coatedIn(data, bb) {
-        const x0 = Math.max(0, Math.floor(bb.x)), x1 = Math.min(this.W, Math.ceil(bb.x + bb.w));
-        const y0 = Math.max(0, Math.floor(bb.y)), y1 = Math.min(this.H, Math.ceil(bb.y + bb.h));
-        let coated = 0;
-        for (let y = y0; y < y1; y += 2) {
-            for (let x = x0; x < x1; x += 2) {
-                if (data[(y * this.W + x) * 4 + 3] > 40) coated++;
-            }
-        }
-        return coated;
-    }
+    canvas.addEventListener('pointerdown', (e) => {
+        if (!loaded || revealed) return;
+        scratching = true;
+        last = null;
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* unsupported */ }
+        _stroke(_pos(e));
+    });
+    canvas.addEventListener('pointermove', (e) => {
+        if (!scratching || revealed) return;
+        _stroke(_pos(e));
+        if (++moveCount % 10 === 0) _check();
+    });
+    const end = () => { if (!scratching) return; scratching = false; last = null; _check(); };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', () => { scratching = false; last = null; });
+    canvas.addEventListener('pointerleave', () => { scratching = false; last = null; });
 
-    /** Fully clears a single zone's coating (its shape), uncovering the number beneath. */
-    _clearZone(z) {
-        const { ctx } = this;
-        const bb = this._bbox(z);
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.beginPath();
-        if (z.shape === 'circle') ctx.arc(z.cx * this.W, z.cy * this.H, z.r * this.W, 0, Math.PI * 2);
-        else this._roundRectPath(bb.x, bb.y, bb.w, bb.h, Math.min(bb.w, bb.h) * 0.18);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
-    }
+    return {
+        reset() {
+            revealed = false;
+            scratching = false;
+            moveCount = 0;
+            last = null;
+            paint();
+        },
+    };
 }
