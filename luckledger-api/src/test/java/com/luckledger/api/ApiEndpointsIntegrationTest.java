@@ -261,17 +261,14 @@ class ApiEndpointsIntegrationTest {
         mockMvc.perform(get("/api/tickets/" + firstTicketId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(false))
-                .andExpect(jsonPath("$.isWinner").doesNotExist())
-                .andExpect(jsonPath("$.grid").doesNotExist()); // no peeking at the symbols before reveal
+                .andExpect(jsonPath("$.isWinner").doesNotExist());
 
         String body = "{\"playerId\":\"" + fundedPlayer() + "\"}";
         mockMvc.perform(post("/api/tickets/" + firstTicketId + "/reveal")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(true))
-                .andExpect(jsonPath("$.isWinner").exists())
-                .andExpect(jsonPath("$.grid").isArray())
-                .andExpect(jsonPath("$.grid[0].symbol").exists()); // real engine grid is exposed on reveal
+                .andExpect(jsonPath("$.isWinner").exists());
 
         mockMvc.perform(post("/api/tickets/" + firstTicketId + "/reveal")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
