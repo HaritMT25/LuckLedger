@@ -1,7 +1,6 @@
 package com.luckledger.api;
 
 import com.luckledger.domain.player.Player;
-import com.luckledger.player.bank.BankService;
 import java.math.BigDecimal;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -19,11 +18,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class PlayerController {
 
     private final PlayerRegistry players;
-    private final BankService bankService;
 
-    public PlayerController(PlayerRegistry players, BankService bankService) {
+    public PlayerController(PlayerRegistry players) {
         this.players = players;
-        this.bankService = bankService;
     }
 
     @PostMapping
@@ -39,9 +36,7 @@ public class PlayerController {
 
     @PostMapping("/{playerId}/borrow")
     public PlayerDto borrow(@PathVariable UUID playerId, @RequestBody BorrowRequest request) {
-        Player player = players.get(playerId);
-        bankService.borrow(player, request.amount());
-        return dto(player);
+        return dto(players.borrow(playerId, request.amount()));
     }
 
     private static PlayerDto dto(Player p) {

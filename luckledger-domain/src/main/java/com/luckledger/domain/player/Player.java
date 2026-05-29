@@ -51,6 +51,38 @@ public class Player {
         this.ticketCount = 0;
     }
 
+    /**
+     * Reconstructs a player from persisted state (the running totals are trusted, not recomputed).
+     * Used by the persistence layer to turn a stored row back into a domain {@code Player} so the
+     * pure bankroll logic ({@link #debit}, {@link #credit}, {@link #recordBorrow}) can run, after which
+     * the mutated state is written back.
+     *
+     * @throws NullPointerException     if any monetary argument is {@code null}
+     * @throws IllegalArgumentException if {@code displayName} is blank, any total is negative, or
+     *                                  {@code ticketCount} is negative
+     */
+    public static Player rehydrate(UUID playerId, String displayName, BigDecimal coinBalance,
+            BigDecimal totalBorrowed, BigDecimal totalSpent, BigDecimal totalWon, int ticketCount) {
+        Player player = new Player(playerId, displayName);
+        player.coinBalance = requireNonNegative(coinBalance, "coinBalance");
+        player.totalBorrowed = requireNonNegative(totalBorrowed, "totalBorrowed");
+        player.totalSpent = requireNonNegative(totalSpent, "totalSpent");
+        player.totalWon = requireNonNegative(totalWon, "totalWon");
+        if (ticketCount < 0) {
+            throw new IllegalArgumentException("ticketCount must be >= 0, was " + ticketCount);
+        }
+        player.ticketCount = ticketCount;
+        return player;
+    }
+
+    private static BigDecimal requireNonNegative(BigDecimal amount, String field) {
+        Objects.requireNonNull(amount, field + " must not be null");
+        if (amount.signum() < 0) {
+            throw new IllegalArgumentException(field + " must be >= 0, was " + amount.toPlainString());
+        }
+        return amount;
+    }
+
     public UUID getPlayerId() {
         return playerId;
     }

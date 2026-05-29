@@ -1,6 +1,6 @@
 package com.luckledger.api;
 
-import com.luckledger.distribution.TicketBook;
+import com.luckledger.api.persistence.TicketBookEntity;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,9 +32,9 @@ public class BookController {
         return dto(gameStore.book(bookId));
     }
 
-    private static BookDto dto(TicketBook book) {
-        return new BookDto(
-                book.bookId(), book.poolContractId(), book.getTotalTickets(), book.getTicketsRemaining());
+    private static BookDto dto(TicketBookEntity book) {
+        int remaining = book.getTotalTickets() - book.getNextIndex();
+        return new BookDto(book.getId(), book.getPoolContractId(), book.getTotalTickets(), remaining);
     }
 
     /** Metadata only — no ticket list, no per-ticket prize. */

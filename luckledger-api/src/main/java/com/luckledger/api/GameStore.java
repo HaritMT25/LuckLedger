@@ -1,112 +1,96 @@
 package com.luckledger.api;
 
-import com.luckledger.distribution.Dealer;
-import com.luckledger.distribution.GameSetupResult;
-import com.luckledger.distribution.TicketBook;
-import com.luckledger.domain.generation.TicketCard;
-import com.luckledger.domain.mechanic.MechanicType;
-import com.luckledger.domain.orchestration.GameConfig;
-import java.math.BigDecimal;
-import java.util.Collection;
+import com.luckledger.api.persistence.DealerEntity;
+import com.luckledger.api.persistence.DealerRepository;
+import com.luckledger.api.persistence.GameEntity;
+import com.luckledger.api.persistence.GameRepository;
+import com.luckledger.api.persistence.TicketBookEntity;
+import com.luckledger.api.persistence.TicketBookRepository;
+import com.luckledger.api.persistence.TicketEntity;
+import com.luckledger.api.persistence.TicketRepository;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
- * In-memory registry of the pre-generated games and by-id indexes over their books, dealers, and
- * tickets. Games are seeded at startup (no live {@code POST /games}); everything else looks up by id.
+ * Read-only facade over the persisted games and their dealers, books, and tickets. Replaces the
+ * former in-memory registry: every lookup hits Postgres via the repositories.
  *
- * <p>Indexing books/dealers/tickets here keeps the controllers thin and lets a purchase resolve the
- * owning dealer and the game's ticket price (which lives on the {@link GameConfig}'s pool, not on the
- * {@link TicketBook}). Only <em>allocated</em> books are purchasable, so the book/dealer indexes are
- * built from the allocation map.
+ * <p>Only <em>allocated</em> books (those assigned to a dealer) are exposed and purchasable — an
+ * unallocated book is not visible here, matching the prior in-memory behaviour where only books in
+ * the allocation map were indexed.
  */
 @Service
+@Transactional(readOnly = true)
 public class GameStore {
 
-    /** A registered game: its id, the config it was built from, and the resulting setup. */
-    public record StoredGame(UUID gameId, GameConfig config, GameSetupResult setup) {}
+    private final GameRepository games;
+    private final DealerRepository dealers;
+    private final TicketBookRepository books;
+    private final TicketRepository tickets;
 
-    private final Map<UUID, StoredGame> games = new ConcurrentHashMap<>();
-    private final Map<UUID, TicketBook> booksById = new ConcurrentHashMap<>();
-    private final Map<UUID, Dealer> dealersById = new ConcurrentHashMap<>();
-    private final Map<UUID, UUID> bookToGame = new ConcurrentHashMap<>();
-    private final Map<UUID, Dealer> bookToDealer = new ConcurrentHashMap<>();
-    private final Map<UUID, TicketCard> ticketsById = new ConcurrentHashMap<>();
-
-    /**
-     * Registers a pre-generated game and indexes its dealers, allocated books, and tickets.
-     *
-     * @param config the config the game was built from (carries the ticket price); never {@code null}
-     * @param setup the generated/allocated game; never {@code null}
-     * @return the assigned game id
-     */
-    public UUID register(GameConfig config, GameSetupResult setup) {
-        Objects.requireNonNull(config, "config must not be null");
-        Objects.requireNonNull(setup, "setup must not be null");
-        UUID gameId = UUID.randomUUID();
-        games.put(gameId, new StoredGame(gameId, config, setup));
-        setup.dealers().forEach(dealer -> dealersById.put(dealer.dealerId(), dealer));
-        setup.allocationMap().forEach((dealer, books) -> books.forEach(book -> {
-            booksById.put(book.bookId(), book);
-            bookToGame.put(book.bookId(), gameId);
-            bookToDealer.put(book.bookId(), dealer);
-        }));
-        setup.generationResult().tickets().forEach(card -> ticketsById.put(card.ticketId(), card));
-        return gameId;
+    public GameStore(GameRepository games, DealerRepository dealers, TicketBookRepository books,
+            TicketRepository tickets) {
+        this.games = games;
+        this.dealers = dealers;
+        this.books = books;
+        this.tickets = tickets;
     }
 
-    public StoredGame game(UUID gameId) {
-        return require(games.get(Objects.requireNonNull(gameId, "gameId")), "game", gameId);
+    public List<GameEntity> games() {
+        return games.findAll();
     }
 
-    public Collection<StoredGame> games() {
-        return List.copyOf(games.values());
+    public GameEntity game(UUID gameId) {
+        Objects.requireNonNull(gameId, "gameId");
+        return games.findById(gameId).orElseThrow(() -> notFound("game", gameId));
     }
 
-    public TicketBook book(UUID bookId) {
-        return require(booksById.get(Objects.requireNonNull(bookId, "bookId")), "book", bookId);
+    /** All allocated (purchasable) books. */
+    public List<TicketBookEntity> books() {
+        return books.findAll().stream().filter(b -> b.getDealerId() != null).toList();
     }
 
-    public Collection<TicketBook> books() {
-        return List.copyOf(booksById.values());
-    }
-
-    public Dealer dealerForBook(UUID bookId) {
-        return require(bookToDealer.get(Objects.requireNonNull(bookId, "bookId")), "book", bookId);
-    }
-
-    /** The ticket price of the game that owns the book. */
-    public BigDecimal ticketPrice(UUID bookId) {
-        UUID gameId = require(bookToGame.get(Objects.requireNonNull(bookId, "bookId")), "book", bookId);
-        return game(gameId).config().poolContract().ticketPrice();
-    }
-
-    public Dealer dealer(UUID dealerId) {
-        return require(dealersById.get(Objects.requireNonNull(dealerId, "dealerId")), "dealer", dealerId);
-    }
-
-    public Collection<Dealer> dealers() {
-        return List.copyOf(dealersById.values());
-    }
-
-    public TicketCard ticket(UUID ticketId) {
-        return require(ticketsById.get(Objects.requireNonNull(ticketId, "ticketId")), "ticket", ticketId);
-    }
-
-    /** The mechanic a game was generated with, read from its first ticket. */
-    public static MechanicType mechanicOf(GameSetupResult setup) {
-        return setup.generationResult().tickets().get(0).layout().mechanicType();
-    }
-
-    private static <T> T require(T value, String kind, UUID id) {
-        if (value == null) {
-            throw new NoSuchElementException("no " + kind + " with id " + id);
+    /** An allocated book by id; a non-existent or unallocated book is treated as not found. */
+    public TicketBookEntity book(UUID bookId) {
+        Objects.requireNonNull(bookId, "bookId");
+        TicketBookEntity book = books.findById(bookId).filter(b -> b.getDealerId() != null).orElse(null);
+        if (book == null) {
+            throw notFound("book", bookId);
         }
-        return value;
+        return book;
+    }
+
+    /** The dealer that owns an allocated book. */
+    public DealerEntity dealerForBook(UUID bookId) {
+        return dealer(book(bookId).getDealerId());
+    }
+
+    public List<DealerEntity> dealers() {
+        return dealers.findAll();
+    }
+
+    public DealerEntity dealer(UUID dealerId) {
+        Objects.requireNonNull(dealerId, "dealerId");
+        return dealers.findById(dealerId).orElseThrow(() -> notFound("dealer", dealerId));
+    }
+
+    public TicketEntity ticket(UUID ticketId) {
+        Objects.requireNonNull(ticketId, "ticketId");
+        return tickets.findById(ticketId).orElseThrow(() -> notFound("ticket", ticketId));
+    }
+
+    /** How many of a dealer's books are still selling (cursor has not reached the end). */
+    public int activeBookCount(UUID dealerId) {
+        return (int) books.findByDealerId(dealerId).stream()
+                .filter(b -> b.getNextIndex() < b.getTotalTickets())
+                .count();
+    }
+
+    private static NoSuchElementException notFound(String kind, UUID id) {
+        return new NoSuchElementException("no " + kind + " with id " + id);
     }
 }

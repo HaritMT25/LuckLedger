@@ -1,6 +1,7 @@
 package com.luckledger.api;
 
-import com.luckledger.distribution.Dealer;
+import com.luckledger.api.persistence.DealerEntity;
+import com.luckledger.distribution.AllocationQuartile;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,7 +22,7 @@ public class DealerController {
 
     @GetMapping
     public List<DealerDto> list() {
-        return gameStore.dealers().stream().map(DealerController::dto).toList();
+        return gameStore.dealers().stream().map(this::dto).toList();
     }
 
     @GetMapping("/{dealerId}")
@@ -29,14 +30,14 @@ public class DealerController {
         return dto(gameStore.dealer(dealerId));
     }
 
-    private static DealerDto dto(Dealer dealer) {
+    private DealerDto dto(DealerEntity dealer) {
         return new DealerDto(
-                dealer.dealerId(),
-                dealer.name(),
-                dealer.tier().name(),
-                dealer.getAllocationQuartile().name(),
-                dealer.activeBooks().size(),
-                dealer.booksDepleted());
+                dealer.getId(),
+                dealer.getName(),
+                dealer.getTier().name(),
+                AllocationQuartile.fromTier(dealer.getTier()).name(),
+                gameStore.activeBookCount(dealer.getId()),
+                dealer.getBooksDepleted());
     }
 
     public record DealerDto(

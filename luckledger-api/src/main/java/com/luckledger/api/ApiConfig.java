@@ -36,8 +36,6 @@ import com.luckledger.domain.ledger.VarianceExplanationInsight;
 import com.luckledger.player.bank.BankService;
 import com.luckledger.player.ledger.LedgerService;
 import com.luckledger.player.ledger.TransactionRecorder;
-import com.luckledger.scratchflow.ScratchRevealService;
-import com.luckledger.scratchflow.TicketPurchaseService;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.util.LinkedHashMap;
@@ -105,19 +103,6 @@ public class ApiConfig {
     @Bean
     public BankService bankService(TransactionRecorder transactionRecorder) {
         return new BankService(transactionRecorder);
-    }
-
-    @Bean
-    public TicketPurchaseService ticketPurchaseService(TransactionRecorder transactionRecorder) {
-        return new TicketPurchaseService(transactionRecorder);
-    }
-
-    /** A reveal service per mechanic (each with its mechanic's evaluator), keyed for routing. */
-    @Bean
-    public Map<MechanicType, ScratchRevealService> revealServices(TransactionRecorder transactionRecorder) {
-        return Map.of(
-                MechanicType.CELESTIAL_FORTUNE, new ScratchRevealService(CELESTIAL.createEvaluator(), transactionRecorder),
-                MechanicType.DEMON_SEAL, new ScratchRevealService(DEMON.createEvaluator(), transactionRecorder));
     }
 
     @Bean

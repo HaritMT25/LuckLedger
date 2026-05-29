@@ -59,6 +59,7 @@ public final class GamePersistenceMapper {
                 generation.verificationReport().passed(),
                 generation.generationTimeMs(),
                 generation.nearMissReport(),
+                generation.verificationReport(),
                 createdAt);
 
         List<DealerEntity> dealers = new ArrayList<>();

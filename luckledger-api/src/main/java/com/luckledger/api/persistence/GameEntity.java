@@ -1,6 +1,7 @@
 package com.luckledger.api.persistence;
 
 import com.luckledger.domain.generation.verification.NearMissReport;
+import com.luckledger.domain.generation.verification.VerificationReport;
 import com.luckledger.domain.mechanic.MechanicType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -57,6 +58,10 @@ public class GameEntity {
     @Column(name = "near_miss", nullable = false, columnDefinition = "jsonb")
     private NearMissReport nearMiss;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "verification_report", nullable = false, columnDefinition = "jsonb")
+    private VerificationReport verificationReport;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -64,7 +69,7 @@ public class GameEntity {
 
     public GameEntity(UUID id, MechanicType mechanicType, String themeId, BigDecimal ticketPrice, int totalTickets,
             BigDecimal payoutRatio, int bookCount, int dealerCount, boolean verificationPassed, long generationTimeMs,
-            NearMissReport nearMiss, Instant createdAt) {
+            NearMissReport nearMiss, VerificationReport verificationReport, Instant createdAt) {
         this.id = id;
         this.mechanicType = mechanicType;
         this.themeId = themeId;
@@ -76,6 +81,7 @@ public class GameEntity {
         this.verificationPassed = verificationPassed;
         this.generationTimeMs = generationTimeMs;
         this.nearMiss = nearMiss;
+        this.verificationReport = verificationReport;
         this.createdAt = createdAt;
     }
 
@@ -90,5 +96,6 @@ public class GameEntity {
     public boolean isVerificationPassed() { return verificationPassed; }
     public long getGenerationTimeMs() { return generationTimeMs; }
     public NearMissReport getNearMiss() { return nearMiss; }
+    public VerificationReport getVerificationReport() { return verificationReport; }
     public Instant getCreatedAt() { return createdAt; }
 }

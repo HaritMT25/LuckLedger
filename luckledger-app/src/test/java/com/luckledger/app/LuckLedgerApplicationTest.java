@@ -30,8 +30,6 @@ class LuckLedgerApplicationTest {
     @Test
     void contextLoadsAndSeedsTheTwoDemoGames() {
         assertThat(gameStore.games()).hasSize(2);
-        assertThat(gameStore.games())
-                .allSatisfy(game ->
-                        assertThat(game.setup().generationResult().verificationReport().passed()).isTrue());
+        assertThat(gameStore.games()).allSatisfy(game -> assertThat(game.isVerificationPassed()).isTrue());
     }
 }

@@ -1,6 +1,6 @@
 package com.luckledger.api;
 
-import com.luckledger.distribution.GameSetupResult;
+import com.luckledger.api.persistence.GameEntity;
 import com.luckledger.domain.generation.verification.NearMissReport;
 import com.luckledger.domain.generation.verification.VerificationReport;
 import java.util.List;
@@ -27,19 +27,17 @@ public class GameController {
 
     @GetMapping
     public List<GameSummary> list() {
-        return gameStore.games().stream()
-                .map(g -> summarize(g.gameId(), g.setup()))
-                .toList();
+        return gameStore.games().stream().map(GameController::summarize).toList();
     }
 
     @GetMapping("/{gameId}")
     public GameSummary get(@PathVariable UUID gameId) {
-        return summarize(gameId, gameStore.game(gameId).setup());
+        return summarize(gameStore.game(gameId));
     }
 
     @GetMapping("/{gameId}/verification")
     public VerificationDto verification(@PathVariable UUID gameId) {
-        VerificationReport report = gameStore.game(gameId).setup().generationResult().verificationReport();
+        VerificationReport report = gameStore.game(gameId).getVerificationReport();
         List<CheckDto> checks = report.checks().stream()
                 .map(c -> new CheckDto(c.name(), c.passed(), c.message()))
                 .toList();
@@ -48,18 +46,18 @@ public class GameController {
 
     @GetMapping("/{gameId}/near-misses")
     public NearMissDto nearMisses(@PathVariable UUID gameId) {
-        NearMissReport report = gameStore.game(gameId).setup().generationResult().nearMissReport();
+        NearMissReport report = gameStore.game(gameId).getNearMiss();
         return new NearMissDto(
                 report.totalLosers(), report.nearMissCount(), report.nearMissRate(), report.distribution());
     }
 
-    private static GameSummary summarize(UUID gameId, GameSetupResult setup) {
+    private static GameSummary summarize(GameEntity game) {
         return new GameSummary(
-                gameId,
-                GameStore.mechanicOf(setup).name(),
-                setup.generationResult().tickets().size(),
-                setup.dealers().size(),
-                setup.generationResult().verificationReport().passed());
+                game.getId(),
+                game.getMechanicType().name(),
+                game.getTotalTickets(),
+                game.getDealerCount(),
+                game.isVerificationPassed());
     }
 
     public record GameSummary(
