@@ -72,41 +72,109 @@ function escapeHtml(s) {
 
 // ---- views -----------------------------------------------------------------
 
+/** Owner initials for the placeholder avatar: "Old Chen" → "OC", "Sam" → "S". */
+function initials(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    return (parts.slice(0, 2).map((p) => p[0]).join('') || '?').toUpperCase();
+}
+
+/** A real avatar image if present, otherwise an initials circle. */
+function avatarHtml(dealer) {
+    if (dealer.avatar) {
+        return `<img class="shop-avatar" src="${escapeHtml(dealer.avatar)}" alt="${escapeHtml(dealer.ownerName)}">`;
+    }
+    return `<span class="shop-avatar shop-avatar--initials">${escapeHtml(initials(dealer.ownerName))}</span>`;
+}
+
 async function renderDealers() {
-    view.innerHTML = `<div class="section-title"><h2>Dealers</h2>
-        <span class="hint">NPC storefronts. Tier and quartile shape which book values they get.</span></div>
+    view.innerHTML = `<div class="section-title"><h2>Shops</h2>
+        <span class="hint">NPC storefronts, each run by an owner. Tap a shop to see what it stocks.</span></div>
         <div class="grid" id="grid"><p class="empty">Loading…</p></div>`;
     try {
         const dealers = await Api.dealers();
-        const container = document.getElementById('grid');
-        if (!dealers.length) { container.innerHTML = `<p class="empty">No dealers seeded.</p>`; return; }
+        const grid = document.getElementById('grid');
+        if (!dealers.length) { grid.innerHTML = `<p class="empty">No shops seeded.</p>`; return; }
+        grid.innerHTML = dealers.map((d) => `
+            <div class="card shop-card" data-dealer="${d.dealerId}" role="button" tabindex="0">
+                <div class="shop-head">
+                    ${avatarHtml(d)}
+                    <div>
+                        <h3>${escapeHtml(d.shopName)}</h3>
+                        <p class="shop-owner">${escapeHtml(d.ownerName)}</p>
+                    </div>
+                </div>
+                <div class="badges">
+                    ${d.games.map((g) => `<span class="badge">${escapeHtml(g.gameName)}</span>`).join('')
+                        || '<span class="badge muted">No games</span>'}
+                </div>
+                <div class="meta">
+                    <span>Tier <b>${d.tier}</b></span>
+                    <span>Active books <b>${d.activeBooks}</b></span>
+                </div>
+            </div>`).join('');
+        grid.querySelectorAll('[data-dealer]').forEach((el) => {
+            const open = () => { location.hash = `#dealer/${el.dataset.dealer}`; };
+            el.addEventListener('click', open);
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+            });
+        });
+    } catch (e) { view.querySelector('#grid').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`; }
+}
 
-        // Group by game so the same-named storefronts from different games don't read as duplicates.
-        const byGame = new Map();
-        for (const d of dealers) {
-            const key = d.gameId || 'unknown';
-            if (!byGame.has(key)) byGame.set(key, { name: d.gameName || 'Game', dealers: [] });
-            byGame.get(key).dealers.push(d);
+/** A single shop's storefront: its books grouped by game, each buyable. */
+async function renderDealerBooks(dealerId) {
+    view.innerHTML = `<div class="section-title"><h2>Shop</h2>
+        <span class="hint"><a href="#dealer">← All shops</a></span></div>
+        <div id="shop-body"><p class="empty">Loading…</p></div>`;
+    try {
+        const [dealers, allBooks] = await Promise.all([Api.dealers(), Api.books()]);
+        const dealer = dealers.find((d) => d.dealerId === dealerId);
+        const body = document.getElementById('shop-body');
+        if (!dealer) { body.innerHTML = `<p class="empty">Shop not found.</p>`; return; }
+
+        let html = `<div class="shop-detail-head">
+            ${avatarHtml(dealer)}
+            <div><h2>${escapeHtml(dealer.shopName)}</h2>
+                <p class="shop-owner">Run by ${escapeHtml(dealer.ownerName)}</p></div></div>`;
+
+        const mine = allBooks.filter((b) => b.dealerId === dealerId);
+        if (!mine.length) {
+            body.innerHTML = html + `<p class="empty">This shop has no books in stock right now.</p>`;
+            return;
         }
 
-        container.classList.remove('grid');
-        container.innerHTML = [...byGame.values()].map((group) => `
-            <section class="game-group">
+        const byGame = new Map();
+        for (const b of mine) {
+            if (!byGame.has(b.gameId)) byGame.set(b.gameId, { name: b.gameName, books: [] });
+            byGame.get(b.gameId).books.push(b);
+        }
+        for (const group of byGame.values()) {
+            group.books.sort((a, b) => a.bookId.localeCompare(b.bookId));
+            html += `<section class="game-group">
                 <h3 class="game-group-title">${escapeHtml(group.name)}</h3>
                 <div class="grid">
-                    ${group.dealers.map((d) => `
+                    ${group.books.map((b, i) => `
                         <div class="card">
-                            <h3>${escapeHtml(d.name)}</h3>
+                            <h3>Book #${i + 1}</h3>
                             <div class="meta">
-                                <span>Tier <b>${d.tier}</b></span>
-                                <span>Quartile <b>${d.quartile}</b></span>
-                                <span>Active books <b>${d.activeBooks}</b></span>
-                                <span>Books depleted <b>${d.booksDepleted}</b></span>
+                                <span>Tickets <b>${b.totalTickets}</b></span>
+                                <span>Remaining <b>${b.ticketsRemaining}</b></span>
                             </div>
+                            <button class="btn block" data-book="${b.bookId}" ${b.ticketsRemaining ? '' : 'disabled'}>
+                                Buy &amp; Scratch</button>
                         </div>`).join('')}
                 </div>
-            </section>`).join('');
-    } catch (e) { view.querySelector('#grid').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`; }
+            </section>`;
+        }
+        body.innerHTML = html;
+        body.querySelectorAll('button[data-book]').forEach((btn) => {
+            btn.onclick = () => buyTicket(btn.dataset.book);
+        });
+    } catch (e) {
+        const body = document.getElementById('shop-body');
+        if (body) body.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+    }
 }
 
 async function renderBooks() {
@@ -250,9 +318,11 @@ function txnTable(txns) {
 const ROUTES = { dealer: renderDealers, book: renderBooks, scratch: renderScratch, ledger: renderLedger };
 
 function route() {
-    const name = (location.hash.replace('#', '') || 'dealer');
+    const raw = location.hash.replace('#', '') || 'dealer';
+    const [name, param] = raw.split('/');
     document.querySelectorAll('.tabs a').forEach((a) =>
         a.classList.toggle('active', a.dataset.route === name));
+    if (name === 'dealer' && param) { renderDealerBooks(decodeURIComponent(param)); return; }
     (ROUTES[name] || renderDealers)();
 }
 

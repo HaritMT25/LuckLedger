@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.luckledger.api.persistence.DealerEntity;
 import com.luckledger.api.persistence.DealerRepository;
 import com.luckledger.api.persistence.GamePersistenceMapper;
 import com.luckledger.api.persistence.GamePersistenceMapper.PersistedGame;
@@ -18,6 +19,7 @@ import com.luckledger.api.persistence.TicketRepository;
 import com.luckledger.distribution.GameSetupResult;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -92,7 +94,10 @@ class ApiEndpointsIntegrationTest {
         PersistedGame persisted =
                 GamePersistenceMapper.toPersisted(gameId, ApiConfig.demonConfig(), setup, Instant.now());
         games.save(persisted.game());
-        dealers.saveAll(persisted.dealers());
+        // One shop per allocation slot (shop id == the slot's dealer id), stocking this game.
+        setup.dealers().forEach(d -> dealers.save(new DealerEntity(
+                d.dealerId(), d.name(), "Owner", null, List.of(gameId),
+                d.tier(), d.rankScore(), d.booksPerCycle(), d.booksDepleted())));
         books.saveAll(persisted.books());
         tickets.saveAll(persisted.tickets());
 
@@ -175,6 +180,10 @@ class ApiEndpointsIntegrationTest {
     void listsAndGetsDealers() throws Exception {
         mockMvc.perform(get("/api/dealers"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].shopName").isNotEmpty())
+                .andExpect(jsonPath("$[0].ownerName").isNotEmpty())
+                .andExpect(jsonPath("$[0].games").isArray())
+                .andExpect(jsonPath("$[0].games[0].gameName").value("Demon Seal"))
                 .andExpect(jsonPath("$[0].tier").isNotEmpty())
                 .andExpect(jsonPath("$[0].quartile").isNotEmpty());
 

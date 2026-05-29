@@ -7,9 +7,17 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.util.List;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
-/** JPA mapping for an NPC dealer storefront and its lifetime book-depletion state. */
+/**
+ * JPA mapping for an NPC <em>shop</em>: a storefront with a name, a human owner, and an (optional)
+ * avatar image. A shop may stock several games — {@code stockedGames} lists the games whose books it
+ * carries — so the same shop appears once across all games it sells, not once per game. {@code tier},
+ * {@code rankScore}, and {@code booksDepleted} are its aggregate lifetime distribution state.
+ */
 @Entity
 @Table(name = "dealer")
 public class DealerEntity {
@@ -17,11 +25,20 @@ public class DealerEntity {
     @Id
     private UUID id;
 
-    @Column(name = "game_id", nullable = false)
-    private UUID gameId;
+    @Column(name = "shop_name", nullable = false)
+    private String shopName;
 
-    @Column(nullable = false)
-    private String name;
+    @Column(name = "owner_name", nullable = false)
+    private String ownerName;
+
+    /** Placeholder for a future avatar image (URL/path); null means "render initials". */
+    @Column(name = "avatar")
+    private String avatar;
+
+    /** Ids of the games this shop stocks (the player can buy any of these games' books here). */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "stocked_games", nullable = false, columnDefinition = "jsonb")
+    private List<UUID> stockedGames;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -38,11 +55,13 @@ public class DealerEntity {
 
     protected DealerEntity() {}
 
-    public DealerEntity(UUID id, UUID gameId, String name, DealerTier tier, int rankScore, int booksPerCycle,
-            int booksDepleted) {
+    public DealerEntity(UUID id, String shopName, String ownerName, String avatar, List<UUID> stockedGames,
+            DealerTier tier, int rankScore, int booksPerCycle, int booksDepleted) {
         this.id = id;
-        this.gameId = gameId;
-        this.name = name;
+        this.shopName = shopName;
+        this.ownerName = ownerName;
+        this.avatar = avatar;
+        this.stockedGames = stockedGames;
         this.tier = tier;
         this.rankScore = rankScore;
         this.booksPerCycle = booksPerCycle;
@@ -50,8 +69,10 @@ public class DealerEntity {
     }
 
     public UUID getId() { return id; }
-    public UUID getGameId() { return gameId; }
-    public String getName() { return name; }
+    public String getShopName() { return shopName; }
+    public String getOwnerName() { return ownerName; }
+    public String getAvatar() { return avatar; }
+    public List<UUID> getStockedGames() { return stockedGames; }
     public DealerTier getTier() { return tier; }
     public int getRankScore() { return rankScore; }
     public int getBooksPerCycle() { return booksPerCycle; }

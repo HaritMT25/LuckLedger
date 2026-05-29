@@ -3,6 +3,7 @@ package com.luckledger.api;
 import com.luckledger.api.persistence.DealerEntity;
 import com.luckledger.api.persistence.GameEntity;
 import com.luckledger.distribution.AllocationQuartile;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -12,7 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Read-only access to the NPC dealers across all seeded games. */
+/** Read-only access to the NPC shops (dealers) and the games each one stocks. */
 @RestController
 @RequestMapping("/api/dealers")
 public class DealerController {
@@ -25,40 +26,46 @@ public class DealerController {
 
     @GetMapping
     public List<DealerDto> list() {
-        Map<UUID, String> gameNames = gameStore.games().stream()
-                .collect(Collectors.toMap(GameEntity::getId, DealerController::gameName));
-        return gameStore.dealers().stream()
-                .map(d -> dto(d, gameNames.getOrDefault(d.getGameId(), "Unknown game")))
-                .toList();
+        Map<UUID, String> gameNames = gameNameIndex();
+        return gameStore.dealers().stream().map(d -> dto(d, gameNames)).toList();
     }
 
     @GetMapping("/{dealerId}")
     public DealerDto get(@PathVariable UUID dealerId) {
-        DealerEntity dealer = gameStore.dealer(dealerId);
-        return dto(dealer, gameName(gameStore.game(dealer.getGameId())));
+        return dto(gameStore.dealer(dealerId), gameNameIndex());
     }
 
-    private DealerDto dto(DealerEntity dealer, String gameName) {
+    private DealerDto dto(DealerEntity dealer, Map<UUID, String> gameNames) {
+        List<GameRef> stocked = dealer.getStockedGames().stream()
+                .map(id -> new GameRef(id, gameNames.getOrDefault(id, "Unknown game")))
+                .toList();
         return new DealerDto(
                 dealer.getId(),
-                dealer.getName(),
-                dealer.getGameId(),
-                gameName,
+                dealer.getShopName(),
+                dealer.getOwnerName(),
+                dealer.getAvatar(),
+                stocked,
                 dealer.getTier().name(),
                 AllocationQuartile.fromTier(dealer.getTier()).name(),
                 gameStore.activeBookCount(dealer.getId()),
                 dealer.getBooksDepleted());
     }
 
+    private Map<UUID, String> gameNameIndex() {
+        return gameStore.games().stream()
+                .collect(Collectors.toMap(GameEntity::getId, DealerController::gameName));
+    }
+
     /** Turns a mechanic enum (e.g. {@code CELESTIAL_FORTUNE}) into a display name ("Celestial Fortune"). */
-    private static String gameName(GameEntity game) {
-        String[] words = game.getMechanicType().name().toLowerCase().split("_");
-        return java.util.Arrays.stream(words)
+    static String gameName(GameEntity game) {
+        return Arrays.stream(game.getMechanicType().name().toLowerCase().split("_"))
                 .map(w -> Character.toUpperCase(w.charAt(0)) + w.substring(1))
                 .collect(Collectors.joining(" "));
     }
 
+    public record GameRef(UUID gameId, String gameName) {}
+
     public record DealerDto(
-            UUID dealerId, String name, UUID gameId, String gameName, String tier, String quartile,
-            int activeBooks, int booksDepleted) {}
+            UUID dealerId, String shopName, String ownerName, String avatar, List<GameRef> games,
+            String tier, String quartile, int activeBooks, int booksDepleted) {}
 }

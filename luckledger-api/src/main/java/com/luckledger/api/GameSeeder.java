@@ -1,5 +1,6 @@
 package com.luckledger.api;
 
+import com.luckledger.api.persistence.DealerEntity;
 import com.luckledger.api.persistence.DealerRepository;
 import com.luckledger.api.persistence.GamePersistenceMapper;
 import com.luckledger.api.persistence.GamePersistenceMapper.PersistedGame;
@@ -7,9 +8,14 @@ import com.luckledger.api.persistence.GameRepository;
 import com.luckledger.api.persistence.TicketBookRepository;
 import com.luckledger.api.persistence.TicketRepository;
 import com.luckledger.cli.GameOrchestrator;
+import com.luckledger.distribution.Dealer;
+import com.luckledger.distribution.DealerTier;
+import com.luckledger.distribution.DealerTierResolver;
 import com.luckledger.distribution.GameSetupResult;
 import com.luckledger.domain.orchestration.GameConfig;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.ApplicationArguments;
@@ -18,16 +24,19 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Persists the two demo games (Celestial Fortune and Demon Seal) to Postgres at startup — each
- * generated, verified, partitioned, and allocated via its orchestrator, then flattened to entity rows
- * by {@link GamePersistenceMapper}. There is no live game-creation endpoint, so this is how games come
- * into existence.
+ * Persists the two demo games (Celestial Fortune and Demon Seal) to Postgres at startup, along with a
+ * fixed roster of NPC <em>shops</em>. Shops are storefronts with a human owner, and each stocks a
+ * chosen subset of the games — so the same shop (e.g. Lucky Mart) can sell both games, while another
+ * (QuickStop) sells only one. Each game's books are allocated only to the shops that stock it; the
+ * generation, ranking, and RTP rules are unchanged.
  *
- * <p>Idempotent: if any game is already persisted (e.g. a restart against a populated database) it
- * does nothing, so the demo set is never duplicated.
+ * <p>Idempotent: if any game is already persisted (e.g. a restart against a populated database) it does
+ * nothing, so the demo set is never duplicated.
  */
 @Component
 public class GameSeeder implements ApplicationRunner {
+
+    private static final int BOOKS_PER_CYCLE = 50;
 
     private final GameOrchestrator celestialOrchestrator;
     private final GameOrchestrator demonOrchestrator;
@@ -57,17 +66,53 @@ public class GameSeeder implements ApplicationRunner {
         if (games.count() > 0) {
             return; // already seeded
         }
-        seed(ApiConfig.celestialConfig(), celestialOrchestrator);
-        seed(ApiConfig.demonConfig(), demonOrchestrator);
+
+        UUID celestialId = UUID.randomUUID();
+        UUID demonId = UUID.randomUUID();
+
+        // The demo shop roster. gameFilter decides which games each shop stocks. The seeded
+        // booksDepleted gives each shop a sales history so its tier (§3.6) differs: allocation bands
+        // books by dealer tier (LOWER/MIDDLE/UPPER), so a game's stocking shops must span the tiers for
+        // every book to find a home. Each game's trio below covers all three tiers.
+        DealerEntity luckyMart = shop("Lucky Mart", "Sam", List.of(celestialId, demonId), 60);     // TIER_3
+        DealerEntity sevenStar = shop("7 Star Corner", "Priya", List.of(celestialId), 20);          // TIER_2
+        DealerEntity goldenExpress = shop("Golden Express", "Old Chen", List.of(celestialId, demonId), 0); // TIER_1
+        DealerEntity quickStop = shop("QuickStop", "Danny", List.of(demonId), 20);                  // TIER_2
+        List<DealerEntity> roster = List.of(luckyMart, sevenStar, goldenExpress, quickStop);
+        dealers.saveAll(roster);
+
+        seed(ApiConfig.celestialConfig(), celestialOrchestrator, celestialId, stockedBy(roster, celestialId));
+        seed(ApiConfig.demonConfig(), demonOrchestrator, demonId, stockedBy(roster, demonId));
     }
 
-    private void seed(GameConfig config, GameOrchestrator orchestrator) {
-        GameSetupResult setup = orchestrator.setup(config);
-        PersistedGame persisted =
-                GamePersistenceMapper.toPersisted(UUID.randomUUID(), config, setup, Instant.now());
+    private void seed(GameConfig config, GameOrchestrator orchestrator, UUID gameId, List<DealerEntity> stockingShops) {
+        // Allocate this game's books across the shops that stock it; a domain Dealer carries the shop's
+        // stable id so each book's dealerId points back at the persisted shop.
+        List<Dealer> dealerSlots = new ArrayList<>(stockingShops.size());
+        for (DealerEntity shop : stockingShops) {
+            dealerSlots.add(new Dealer(
+                    shop.getId(), shop.getShopName(), DealerTier.TIER_1, shop.getRankScore(),
+                    shop.getBooksPerCycle(), shop.getBooksDepleted()));
+        }
+
+        GameSetupResult setup = orchestrator.setup(config, dealerSlots);
+        PersistedGame persisted = GamePersistenceMapper.toPersisted(gameId, config, setup, Instant.now());
         games.save(persisted.game());
-        dealers.saveAll(persisted.dealers());
         books.saveAll(persisted.books());
         tickets.saveAll(persisted.tickets());
+    }
+
+    private static DealerEntity shop(String shopName, String ownerName, List<UUID> stockedGames, int booksDepleted) {
+        // Persisted tier is informational; the allocator re-derives each domain dealer's tier from
+        // booksDepleted at allocation time. We store the matching tier here so the API reports it too.
+        DealerTier tier = new DealerTierResolver().resolve(
+                new Dealer(UUID.randomUUID(), shopName, DealerTier.TIER_1, 0, BOOKS_PER_CYCLE, booksDepleted));
+        return new DealerEntity(
+                UUID.randomUUID(), shopName, ownerName, null, stockedGames,
+                tier, 0, BOOKS_PER_CYCLE, booksDepleted);
+    }
+
+    private static List<DealerEntity> stockedBy(List<DealerEntity> roster, UUID gameId) {
+        return roster.stream().filter(s -> s.getStockedGames().contains(gameId)).toList();
     }
 }

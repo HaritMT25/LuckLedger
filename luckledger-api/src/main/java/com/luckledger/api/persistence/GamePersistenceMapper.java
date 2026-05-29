@@ -1,6 +1,5 @@
 package com.luckledger.api.persistence;
 
-import com.luckledger.distribution.Dealer;
 import com.luckledger.distribution.GameSetupResult;
 import com.luckledger.distribution.TicketBook;
 import com.luckledger.domain.generation.GenerationResult;
@@ -23,15 +22,18 @@ import java.util.UUID;
  * null {@code dealerId} (schema-permitted) so that every generated ticket is reachable by id, matching
  * the in-memory store's behaviour. A freshly seeded game's tickets are all {@code AVAILABLE} with a
  * zero sale cursor.
+ *
+ * <p>Shops (dealers) are <em>not</em> emitted here: a shop can stock several games, so it is persisted
+ * once by the seeder, independent of any single game. Each book still records its owning shop's id via
+ * the allocation map ({@code dealerId}); that id is expected to match an already-persisted shop.
  */
 public final class GamePersistenceMapper {
 
     private GamePersistenceMapper() {}
 
-    /** The full row graph for one game, ready to be saved. */
+    /** The row graph for one game, ready to be saved (shops are persisted separately). */
     public record PersistedGame(
             GameEntity game,
-            List<DealerEntity> dealers,
             List<TicketBookEntity> books,
             List<TicketEntity> tickets) {}
 
@@ -61,18 +63,6 @@ public final class GamePersistenceMapper {
                 generation.nearMissReport(),
                 generation.verificationReport(),
                 createdAt);
-
-        List<DealerEntity> dealers = new ArrayList<>();
-        for (Dealer dealer : setup.dealers()) {
-            dealers.add(new DealerEntity(
-                    dealer.dealerId(),
-                    gameId,
-                    dealer.name(),
-                    dealer.tier(),
-                    dealer.rankScore(),
-                    dealer.booksPerCycle(),
-                    dealer.booksDepleted()));
-        }
 
         // Reverse the allocation map so each book knows its owning dealer (null if unallocated).
         Map<UUID, UUID> bookToDealer = new HashMap<>();
@@ -107,6 +97,6 @@ public final class GamePersistenceMapper {
             }
         }
 
-        return new PersistedGame(game, dealers, bookEntities, ticketEntities);
+        return new PersistedGame(game, bookEntities, ticketEntities);
     }
 }

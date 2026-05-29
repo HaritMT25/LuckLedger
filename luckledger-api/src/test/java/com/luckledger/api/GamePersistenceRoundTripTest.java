@@ -68,9 +68,12 @@ class GamePersistenceRoundTripTest {
         UUID gameId = UUID.randomUUID();
 
         PersistedGame persisted = GamePersistenceMapper.toPersisted(gameId, config, setup, Instant.now());
-        // Save in FK order: game, then dealers, books, tickets.
+        // Save in FK order: game, then shops (one row per allocation slot, id == the slot's dealer id),
+        // then books, tickets.
         games.saveAndFlush(persisted.game());
-        dealers.saveAllAndFlush(persisted.dealers());
+        setup.dealers().forEach(d -> dealers.saveAndFlush(new DealerEntity(
+                d.dealerId(), d.name(), "Owner", null, List.of(gameId),
+                d.tier(), d.rankScore(), d.booksPerCycle(), d.booksDepleted())));
         books.saveAllAndFlush(persisted.books());
         tickets.saveAllAndFlush(persisted.tickets());
 
@@ -85,8 +88,8 @@ class GamePersistenceRoundTripTest {
         assertThat(game.getNearMiss()).isNotNull(); // JSONB report round-tripped
         assertThat(game.getTotalTickets()).isEqualTo(generatedTickets);
 
-        // --- dealers ---
-        assertThat(dealers.findByGameId(gameId)).hasSize(setup.dealers().size());
+        // --- shops --- (one persisted row per allocation slot)
+        assertThat(dealers.findAll()).hasSize(setup.dealers().size());
 
         // --- books + tickets ---
         List<TicketBookEntity> reloadedBooks = books.findByGameId(gameId);

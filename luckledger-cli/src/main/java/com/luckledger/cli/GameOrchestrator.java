@@ -61,6 +61,25 @@ public final class GameOrchestrator {
     }
 
     /**
+     * Sets up a game and allocates its books to a <em>caller-supplied</em> set of dealers, rather than
+     * minting fresh ones. Used when dealers are shared shops that live outside this orchestrator's
+     * registry (so the same shop can stock several games); the allocation, ranking, and RTP rules are
+     * identical to {@link #setup(GameConfig)}.
+     *
+     * @param config the game configuration; never {@code null}
+     * @param dealers the dealers eligible to receive this game's books; non-null and non-empty
+     * @return the full setup result
+     */
+    public GameSetupResult setup(GameConfig config, List<Dealer> dealers) {
+        Objects.requireNonNull(config, "config must not be null");
+        Objects.requireNonNull(dealers, "dealers must not be null");
+        if (dealers.isEmpty()) {
+            throw new IllegalArgumentException("dealers must not be empty");
+        }
+        return runCycle(config, dealers);
+    }
+
+    /**
      * Restocks an existing game: generates a fresh batch and allocates it to the <em>existing</em>
      * dealers, so their ranks (accumulated from prior cycles) persist and shape the new allocation.
      *
