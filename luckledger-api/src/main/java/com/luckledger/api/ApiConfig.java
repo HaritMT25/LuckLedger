@@ -95,10 +95,11 @@ public class ApiConfig {
         return new VerificationSuite(validator, analyzer);
     }
 
-    /** The single append-only ledger shared across bank, purchase, and reveal. */
+    /** The single append-only ledger shared across bank, purchase, and reveal — Postgres-backed. */
     @Bean
-    public TransactionRecorder transactionRecorder() {
-        return new TransactionRecorder();
+    public TransactionRecorder transactionRecorder(
+            com.luckledger.api.persistence.TransactionRepository transactionRepository) {
+        return new com.luckledger.api.persistence.JpaTransactionRecorder(transactionRepository);
     }
 
     @Bean

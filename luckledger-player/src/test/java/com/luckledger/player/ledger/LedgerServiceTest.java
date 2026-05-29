@@ -39,7 +39,7 @@ class LedgerServiceTest {
 
     private static final Instant BASE = Instant.parse("2026-05-28T00:00:00Z");
 
-    private final TransactionRecorder recorder = new TransactionRecorder();
+    private final TransactionRecorder recorder = new InMemoryTransactionRecorder();
     private final AtomicInteger seq = new AtomicInteger();
     private final Map<String, UUID> ticketIds = new java.util.HashMap<>();
 

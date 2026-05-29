@@ -9,6 +9,7 @@ import com.luckledger.domain.mechanic.EvaluationResult;
 import com.luckledger.domain.player.Player;
 import com.luckledger.domain.scratch.RevealResult;
 import com.luckledger.mechanic.WinEvaluator;
+import com.luckledger.player.ledger.InMemoryTransactionRecorder;
 import com.luckledger.player.ledger.TransactionRecorder;
 import java.math.BigDecimal;
 import java.util.List;
@@ -27,7 +28,7 @@ class ScratchRevealServiceTest {
     @Test
     void revealingAWinnerCreditsAndRecordsAWin() {
         Player player = new Player(UUID.randomUUID(), "P");
-        TransactionRecorder recorder = new TransactionRecorder();
+        TransactionRecorder recorder = new InMemoryTransactionRecorder();
         ScratchRevealService service = new ScratchRevealService(evaluatorReturning(true, "25"), recorder);
         TicketCard ticket = Fixtures.card(25);
 
@@ -42,7 +43,7 @@ class ScratchRevealServiceTest {
     @Test
     void revealingALoserCreditsNothing() {
         Player player = new Player(UUID.randomUUID(), "P");
-        TransactionRecorder recorder = new TransactionRecorder();
+        TransactionRecorder recorder = new InMemoryTransactionRecorder();
         ScratchRevealService service = new ScratchRevealService(evaluatorReturning(false, "0"), recorder);
 
         RevealResult result = service.reveal(player, Fixtures.card(0));
@@ -55,7 +56,7 @@ class ScratchRevealServiceTest {
     @Test
     void revealIsIdempotentAndNeverDoubleCredits() {
         Player player = new Player(UUID.randomUUID(), "P");
-        TransactionRecorder recorder = new TransactionRecorder();
+        TransactionRecorder recorder = new InMemoryTransactionRecorder();
         ScratchRevealService service = new ScratchRevealService(evaluatorReturning(true, "25"), recorder);
         TicketCard ticket = Fixtures.card(25);
 
@@ -71,7 +72,7 @@ class ScratchRevealServiceTest {
     @Test
     void getRevealedResultForUnrevealedTicketThrows() {
         ScratchRevealService service =
-                new ScratchRevealService(evaluatorReturning(false, "0"), new TransactionRecorder());
+                new ScratchRevealService(evaluatorReturning(false, "0"), new InMemoryTransactionRecorder());
 
         assertThatThrownBy(() -> service.getRevealedResult(UUID.randomUUID()))
                 .isInstanceOf(NoSuchElementException.class);
@@ -80,7 +81,7 @@ class ScratchRevealServiceTest {
     @Test
     void nullArgumentsAreRejected() {
         ScratchRevealService service =
-                new ScratchRevealService(evaluatorReturning(false, "0"), new TransactionRecorder());
+                new ScratchRevealService(evaluatorReturning(false, "0"), new InMemoryTransactionRecorder());
         assertThatThrownBy(() -> service.reveal(null, Fixtures.card(0)))
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> service.reveal(new Player(UUID.randomUUID(), "P"), null))

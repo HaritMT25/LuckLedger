@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.luckledger.domain.ledger.Transaction;
 import com.luckledger.domain.ledger.TransactionType;
 import com.luckledger.domain.player.Player;
+import com.luckledger.player.ledger.InMemoryTransactionRecorder;
 import com.luckledger.player.ledger.TransactionRecorder;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -25,7 +26,7 @@ class BankServiceTest {
 
     @BeforeEach
     void setUp() {
-        recorder = new TransactionRecorder();
+        recorder = new InMemoryTransactionRecorder();
         bank = new BankService(recorder);
         player = new Player(UUID.randomUUID(), "Ada");
     }

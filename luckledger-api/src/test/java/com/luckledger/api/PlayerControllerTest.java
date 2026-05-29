@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.luckledger.domain.player.Player;
 import com.luckledger.player.bank.BankService;
+import com.luckledger.player.ledger.InMemoryTransactionRecorder;
 import com.luckledger.player.ledger.TransactionRecorder;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,7 +24,7 @@ class PlayerControllerTest {
     @BeforeEach
     void setUp() {
         registry = new PlayerRegistry();
-        BankService bank = new BankService(new TransactionRecorder());
+        BankService bank = new BankService(new InMemoryTransactionRecorder());
         mockMvc = MockMvcBuilders.standaloneSetup(new PlayerController(registry, bank))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

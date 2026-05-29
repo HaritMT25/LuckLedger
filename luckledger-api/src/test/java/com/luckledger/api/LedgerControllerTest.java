@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.luckledger.domain.ledger.Transaction;
 import com.luckledger.domain.ledger.TransactionType;
+import com.luckledger.player.ledger.InMemoryTransactionRecorder;
 import com.luckledger.player.ledger.TransactionRecorder;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -22,7 +23,7 @@ class LedgerControllerTest {
 
     @BeforeEach
     void setUp() {
-        TransactionRecorder recorder = new TransactionRecorder();
+        TransactionRecorder recorder = new InMemoryTransactionRecorder();
         record(recorder, TransactionType.BORROW, "100");
         record(recorder, TransactionType.SPEND, "5");
         record(recorder, TransactionType.WIN, "25");

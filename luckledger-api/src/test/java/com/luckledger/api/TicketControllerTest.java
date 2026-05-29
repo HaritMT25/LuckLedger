@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.luckledger.distribution.GameSetupResult;
 import com.luckledger.domain.mechanic.MechanicType;
 import com.luckledger.domain.player.Player;
+import com.luckledger.player.ledger.InMemoryTransactionRecorder;
 import com.luckledger.player.ledger.TransactionRecorder;
 import com.luckledger.mechanic.CelestialFortuneMechanic;
 import com.luckledger.mechanic.DemonSealMechanic;
@@ -38,7 +39,7 @@ class TicketControllerTest {
         ticketId = game.generationResult().tickets().get(0).ticketId();
 
         players = new PlayerRegistry();
-        TransactionRecorder recorder = new TransactionRecorder();
+        TransactionRecorder recorder = new InMemoryTransactionRecorder();
         Map<MechanicType, ScratchRevealService> reveals = Map.of(
                 MechanicType.CELESTIAL_FORTUNE,
                 new ScratchRevealService(new CelestialFortuneMechanic().createEvaluator(), recorder),

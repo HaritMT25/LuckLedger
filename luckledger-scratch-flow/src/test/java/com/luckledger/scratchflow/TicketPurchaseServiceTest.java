@@ -12,6 +12,7 @@ import com.luckledger.domain.player.InsufficientBalanceException;
 import com.luckledger.domain.player.Player;
 import com.luckledger.domain.scratch.PurchaseResult;
 import com.luckledger.domain.scratch.TicketStatus;
+import com.luckledger.player.ledger.InMemoryTransactionRecorder;
 import com.luckledger.player.ledger.TransactionRecorder;
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -29,7 +30,7 @@ class TicketPurchaseServiceTest {
 
     @BeforeEach
     void setUp() {
-        recorder = new TransactionRecorder();
+        recorder = new InMemoryTransactionRecorder();
         service = new TicketPurchaseService(recorder);
         player = new Player(UUID.randomUUID(), "Player");
         player.recordBorrow(new BigDecimal("100")); // fund with free coins

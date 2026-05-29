@@ -23,7 +23,7 @@ class TransactionRecorderTest {
 
     @BeforeEach
     void setUp() {
-        recorder = new TransactionRecorder();
+        recorder = new InMemoryTransactionRecorder();
     }
 
     @Test
