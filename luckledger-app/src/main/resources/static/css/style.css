@@ -112,6 +112,45 @@ body {
 .view-enter { animation: view-in .28s ease-out; }
 @keyframes view-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
+/* ---- landing hero ------------------------------------------------------------ */
+
+.hero {
+    display: grid; grid-template-columns: 1.2fr 1fr; gap: 1.6rem; align-items: center;
+    background:
+        radial-gradient(600px 280px at 85% 20%, rgba(139, 92, 246, .18), transparent 60%),
+        linear-gradient(160deg, var(--panel) 0%, #160f2c 100%);
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) + 4px);
+    padding: 1.6rem 1.8rem;
+    margin-bottom: 1.8rem;
+    overflow: hidden;
+}
+.hero-text h2 { margin: 0 0 .6rem; font-size: 1.7rem; line-height: 1.2; }
+.hero-text p { margin: 0 0 1rem; color: var(--muted); max-width: 46ch; }
+.hero-actions { display: flex; gap: .6rem; flex-wrap: wrap; }
+.hero-actions .btn { text-decoration: none; display: inline-block; }
+.game-strip { display: grid; gap: .8rem; }
+.game-card {
+    display: flex; gap: .8rem; align-items: center;
+    background: rgba(14, 11, 22, .5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: .7rem .8rem;
+}
+.game-art {
+    width: 58px; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 8px;
+    border: 1px solid var(--border-bright);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .4);
+    flex: 0 0 auto;
+}
+.game-card-body h3 { margin: 0 0 .35rem; font-size: 1rem; }
+.game-facts { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
+.game-facts .fact { color: var(--muted); font-size: .78rem; }
+.game-facts .fact b { color: var(--ink); }
+@media (max-width: 760px) {
+    .hero { grid-template-columns: 1fr; }
+}
+
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
 
 .game-group { margin-bottom: 1.8rem; }
@@ -186,10 +225,24 @@ body {
 
 /* ---- shops ------------------------------------------------------------------ */
 
-.shop-card { cursor: pointer; }
+.shop-card { cursor: pointer; padding-bottom: 2.2rem; }
 .shop-card:active { transform: scale(.99); }
 .shop-head { display: flex; align-items: center; gap: .75rem; margin-bottom: .8rem; }
 .shop-head h3 { margin: 0; }
+.tier-badge {
+    margin-left: auto; align-self: flex-start;
+    font-size: .68rem; font-weight: 700; letter-spacing: .4px;
+    border-radius: 999px; padding: .18rem .55rem; border: 1px solid var(--border);
+    color: var(--muted); background: var(--panel-2);
+}
+.tier-badge.t3 { color: var(--gold); border-color: var(--gold-soft); background: rgba(243, 201, 105, .08); }
+.tier-badge.t2 { color: var(--accent-2); border-color: rgba(139, 92, 246, .4); background: rgba(139, 92, 246, .08); }
+.card-cta {
+    position: absolute; right: 1rem; bottom: .8rem;
+    color: var(--accent-2); font-size: .82rem; font-weight: 600;
+    opacity: 0; transform: translateX(-4px); transition: opacity .15s, transform .15s;
+}
+.shop-card:hover .card-cta, .shop-card:focus-visible .card-cta { opacity: 1; transform: none; }
 .shop-owner { margin: .1rem 0 0; color: var(--muted); font-size: .85rem; }
 .shop-avatar {
     width: 44px; height: 44px; border-radius: 50%; flex: 0 0 auto;
@@ -210,7 +263,20 @@ body {
 .shop-detail-head h2 { margin: 0; }
 .shop-detail-head .shop-avatar { width: 56px; height: 56px; font-size: 1.25rem; }
 
-/* book cards — price up front, stock bar instead of bare counts */
+/* book cards — ticket art, price up front, stock bar instead of bare counts */
+.book-card { padding-top: 0; }
+.book-art {
+    display: block; width: calc(100% + 2.2rem); margin: 0 -1.1rem .8rem;
+    height: 96px; object-fit: cover; object-position: 50% 12%;
+    border-bottom: 1px solid var(--border);
+    filter: saturate(1.1);
+}
+.book-card.sold-out .book-art { filter: grayscale(.9) brightness(.6); }
+.top-prize {
+    float: right; color: var(--gold); font-size: .78rem; font-weight: 600;
+    background: rgba(243, 201, 105, .08); border: 1px solid var(--gold-soft);
+    border-radius: 999px; padding: .15rem .6rem;
+}
 .book-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
 .price-tag {
     color: var(--gold); font-weight: 700; font-size: .95rem; white-space: nowrap;
@@ -365,6 +431,7 @@ body {
 .stat .label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .5px; }
 .stat .value { font-size: 1.4rem; font-weight: 700; margin-top: .2rem; font-variant-numeric: tabular-nums; }
 .value.good { color: var(--good); } .value.bad { color: var(--bad); }
+.value.gold { color: var(--gold); }
 
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
@@ -407,6 +474,27 @@ tbody tr:hover { background: rgba(139, 92, 246, .06); }
 .cmp-fill.ahead { background: linear-gradient(90deg, #3c8a55, var(--good)); }
 .cmp-rate { font-size: .85rem; font-weight: 600; white-space: nowrap; }
 .cmp-sub { color: var(--muted); font-weight: 400; font-size: .75rem; }
+
+/* ---- the house ----------------------------------------------------------------- */
+
+.house-note { color: var(--muted); font-size: .88rem; margin: 0 0 1.2rem; }
+.house-game { margin-bottom: 1rem; }
+.house-game-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }
+.house-game-head h3 { margin: 0; margin-right: .4rem; }
+.badge.ok { color: var(--good); border-color: rgba(74, 222, 128, .4); background: rgba(74, 222, 128, .08); }
+.badge.fail { color: var(--bad); border-color: rgba(248, 113, 113, .4); background: rgba(248, 113, 113, .08); }
+.house-bar-row {
+    display: grid; grid-template-columns: 120px 1fr; gap: .3rem .8rem; align-items: center;
+    margin-bottom: .7rem;
+}
+.house-bar-label { color: var(--muted); font-size: .8rem; }
+.house-bar { height: 12px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; }
+.house-fill { height: 100%; transition: width .5s ease; }
+.house-fill.fund { background: linear-gradient(90deg, #b88b1f, var(--gold)); }
+.house-fill.sold { background: linear-gradient(90deg, #6d4fc0, var(--accent-2)); }
+.house-bar-value { grid-column: 2; font-size: .82rem; }
+/* later in the cascade than .card .meta's grid, same specificity — flex wins here */
+.house-game .house-meta { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; margin-top: .4rem; }
 
 /* ---- toast & footer ----------------------------------------------------------- */
 

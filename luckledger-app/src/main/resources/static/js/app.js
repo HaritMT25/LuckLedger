@@ -198,10 +198,55 @@ function avatarHtml(dealer) {
     return `<span class="shop-avatar shop-avatar--initials">${escapeHtml(initials(dealer.ownerName))}</span>`;
 }
 
+/** Cached GET /api/games (name, price, RTP, top prize) — used by the hero strip and book cards. */
+let _gamesCache = null;
+async function loadGames() {
+    if (!_gamesCache) _gamesCache = await Api.games();
+    return _gamesCache;
+}
+
+function tierLabel(tier) {
+    return String(tier || '').replace('TIER_', 'Tier ');
+}
+
+/** One game in the hero strip: ticket art, price, top prize, and the RTP stated up front. */
+function gameStripCard(g) {
+    const art = TICKET_ART[g.mechanic];
+    return `
+        <div class="game-card">
+            ${art ? `<img class="game-art" src="${art}" alt="${escapeHtml(g.gameName)} ticket" loading="lazy">` : ''}
+            <div class="game-card-body">
+                <h3>${MECHANIC_EMOJI[g.mechanic] || '🎟️'} ${escapeHtml(g.gameName)}</h3>
+                <div class="game-facts">
+                    <span class="price-tag">${money(g.ticketPrice)} coins</span>
+                    <span class="fact">Top prize <b>${money(g.topPrize)}</b></span>
+                    <span class="fact">Returns <b>${Math.round(Number(g.payoutRatio) * 100)}%</b> of every coin</span>
+                </div>
+            </div>
+        </div>`;
+}
+
 async function renderDealers() {
-    view.innerHTML = `<div class="section-title"><h2>Shops</h2>
-        <span class="hint">NPC storefronts, each run by an owner. Tap a shop to see what it stocks.</span></div>
+    view.innerHTML = `
+        <section class="hero">
+            <div class="hero-text">
+                <h2>Every ticket is already decided.</h2>
+                <p>Buy from a shop, scratch the foil, and watch the math the lottery never shows you.
+                    Free coins, real odds, no stakes — the house edge is printed right on the games.</p>
+                <div class="hero-actions">
+                    <a class="btn" href="#dealer">Browse the shops</a>
+                    <a class="btn secondary" href="#house">See the house's books</a>
+                </div>
+            </div>
+            <div class="game-strip" id="game-strip">${skeletonCards(2)}</div>
+        </section>
+        <div class="section-title"><h2>Shops</h2>
+            <span class="hint">NPC storefronts, each run by an owner. Tap a shop to see what it stocks.</span></div>
         <div id="grid">${skeletonCards(6)}</div>`;
+    loadGames().then((games) => {
+        const strip = document.getElementById('game-strip');
+        if (strip) strip.innerHTML = games.map(gameStripCard).join('');
+    }).catch(() => { /* hero strip is decorative */ });
     try {
         const dealers = await Api.dealers();
         const grid = document.getElementById('grid');
@@ -216,15 +261,17 @@ async function renderDealers() {
                         <h3>${escapeHtml(d.shopName)}</h3>
                         <p class="shop-owner">${escapeHtml(d.ownerName)}</p>
                     </div>
+                    <span class="tier-badge t${(d.tier || '').slice(-1)}">${tierLabel(d.tier)}</span>
                 </div>
                 <div class="badges">
                     ${d.games.map((g) => `<span class="badge">${escapeHtml(g.gameName)}</span>`).join('')
                         || '<span class="badge muted">No games</span>'}
                 </div>
                 <div class="meta">
-                    <span>Tier <b>${d.tier}</b></span>
-                    <span>Active books <b>${d.activeBooks}</b></span>
+                    <span>Books in stock <b>${d.activeBooks}</b></span>
+                    <span>Books sold out <b>${d.booksDepleted}</b></span>
                 </div>
+                <span class="card-cta">Browse →</span>
             </div>`).join('');
         grid.querySelectorAll('[data-dealer]').forEach((el) => {
             const open = () => { location.hash = `#dealer/${el.dataset.dealer}`; };
@@ -243,7 +290,10 @@ async function renderDealerBooks(dealerId) {
         <span class="hint"><a href="#dealer">← All shops</a></span></div>
         <div id="shop-body">${skeletonCards(3)}</div>`;
     try {
-        const [dealer, mine] = await Promise.all([Api.dealer(dealerId), Api.dealerBooks(dealerId)]);
+        const [dealer, mine, games] = await Promise.all([
+            Api.dealer(dealerId), Api.dealerBooks(dealerId), loadGames().catch(() => []),
+        ]);
+        const topPrizeByGame = new Map(games.map((g) => [g.gameId, g.topPrize]));
         const body = document.getElementById('shop-body');
 
         let html = `<div class="shop-detail-head">
@@ -263,8 +313,10 @@ async function renderDealerBooks(dealerId) {
         }
         for (const group of byGame.values()) {
             group.books.sort((a, b) => a.bookId.localeCompare(b.bookId));
+            const topPrize = topPrizeByGame.get(group.books[0].gameId);
             html += `<section class="game-group">
-                <h3 class="game-group-title">${MECHANIC_EMOJI[group.books[0].mechanic] || '🎟️'} ${escapeHtml(group.name)}</h3>
+                <h3 class="game-group-title">${MECHANIC_EMOJI[group.books[0].mechanic] || '🎟️'} ${escapeHtml(group.name)}
+                    ${topPrize ? `<span class="top-prize">Top prize ${money(topPrize)} coins</span>` : ''}</h3>
                 <div class="grid">
                     ${group.books.map((b, i) => bookCard(b, i)).join('')}
                 </div>
@@ -280,12 +332,14 @@ async function renderDealerBooks(dealerId) {
     }
 }
 
-/** One buyable book: price up front, a stock bar instead of bare counts. */
+/** One buyable book: ticket art, price up front, a stock bar instead of bare counts. */
 function bookCard(b, i) {
     const soldOut = !b.ticketsRemaining;
     const pct = b.totalTickets ? Math.round((b.ticketsRemaining / b.totalTickets) * 100) : 0;
+    const art = TICKET_ART[b.mechanic];
     return `
-        <div class="card book-card">
+        <div class="card book-card${soldOut ? ' sold-out' : ''}">
+            ${art ? `<img class="book-art" src="${art}" alt="" loading="lazy">` : ''}
             <div class="book-head">
                 <h3>Book #${i + 1}</h3>
                 <span class="price-tag">${money(b.ticketPrice)} coins</span>
@@ -681,9 +735,79 @@ function txnTable(txns) {
     return `<table><thead><tr><th>Type</th><th>Amount</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+// ---- the house -------------------------------------------------------------
+
+/** The operator's dashboard, deliberately public: pool economics fixed before the first sale. */
+async function renderHouse() {
+    view.innerHTML = `<div class="section-title"><h2>🏛️ The House</h2>
+        <span class="hint">The operator's side of the table — public here, hidden everywhere else.</span></div>
+        <div id="house-body">${skeletonCards(3)}</div>`;
+    try {
+        const o = await Api.house();
+        const body = document.getElementById('house-body');
+        if (!body) return; // navigated away
+        const t = o.totals;
+        const profit = Number(t.houseProfit);
+        body.innerHTML = `
+            <div class="stats">
+                ${stat('Players', t.players)}
+                ${stat('Tickets sold', t.ticketsSold)}
+                ${stat('Coins taken in', money(t.revenue))}
+                ${stat('Coins paid out', money(t.paidOut))}
+                ${stat('House profit', (profit >= 0 ? '+' : '') + money(profit), profit >= 0 ? 'gold' : 'bad')}
+                ${stat('Books selling', t.activeBooks)}
+            </div>
+            <p class="house-note">Every number below was fixed at generation time — before the first
+                ticket was sold, the house knew exactly how much each game would keep.</p>
+            ${o.games.map(houseGamePanel).join('')}`;
+    } catch (e) {
+        const body = document.getElementById('house-body');
+        if (body) body.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+    }
+}
+
+function houseGamePanel(g) {
+    const rtp = Math.round(Number(g.payoutRatio) * 1000) / 10;
+    const fundPct = Math.min(100, (Number(g.prizeFund) / Math.max(1, Number(g.maxRevenue))) * 100);
+    const soldPct = g.totalTickets ? (g.ticketsSold / g.totalTickets) * 100 : 0;
+    return `
+    <div class="house-game card">
+        <div class="house-game-head">
+            <h3>${MECHANIC_EMOJI[g.mechanic] || '🎟️'} ${escapeHtml(g.gameName)}</h3>
+            <span class="badge ${g.verificationPassed ? 'ok' : 'fail'}">
+                ${g.verificationPassed ? '✓ verified' : '✗ unverified'}</span>
+            <span class="badge">RTP ${rtp}%</span>
+            <span class="badge">${money(g.ticketPrice)} coins / ticket</span>
+            <span class="badge">Top prize ${money(g.topPrize)}</span>
+        </div>
+        <div class="house-bar-row">
+            <span class="house-bar-label">Built to pay back</span>
+            <div class="house-bar">
+                <div class="house-fill fund" style="width:${fundPct.toFixed(1)}%"></div>
+            </div>
+            <span class="house-bar-value">${money(g.prizeFund)} of ${money(g.maxRevenue)} coins
+                <span class="cmp-sub">— the house keeps ${money(Number(g.maxRevenue) - Number(g.prizeFund))}, guaranteed</span></span>
+        </div>
+        <div class="house-bar-row">
+            <span class="house-bar-label">Tickets sold</span>
+            <div class="house-bar">
+                <div class="house-fill sold" style="width:${soldPct.toFixed(1)}%"></div>
+            </div>
+            <span class="house-bar-value">${g.ticketsSold} of ${g.totalTickets}
+                <span class="cmp-sub">(${g.ticketsRevealed} scratched)</span></span>
+        </div>
+        <div class="meta house-meta">
+            <span>Books <b>${g.books.active} selling</b> · ${g.books.depleted} sold out · ${g.books.total} total</span>
+            <span>Taken in <b>${money(g.revenue)}</b> · paid out <b>${money(g.paidOut)}</b></span>
+            <span>Engineered near-miss rate <b>${Math.round(Number(g.nearMissRate) * 100)}%</b> of losers</span>
+            <span>Generated in <b>${g.generationTimeMs}ms</b></span>
+        </div>
+    </div>`;
+}
+
 // ---- router ----------------------------------------------------------------
 
-const ROUTES = { dealer: renderDealers, scratch: renderScratch, ledger: renderLedger };
+const ROUTES = { dealer: renderDealers, scratch: renderScratch, ledger: renderLedger, house: renderHouse };
 
 function route() {
     const raw = location.hash.replace('#', '') || 'dealer';

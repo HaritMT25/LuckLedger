@@ -36,6 +36,7 @@ const Api = (() => {
         dealerBooks: (id) => request('GET', `/dealers/${id}/books`),
         games: () => request('GET', '/games'),
         nearMisses: (gameId) => request('GET', `/games/${gameId}/near-misses`),
+        house: () => request('GET', '/house/overview'),
         // play
         purchase: (bookId, playerId) => request('POST', `/books/${bookId}/purchase`, { playerId }),
         ticket: (ticketId) => request('GET', `/tickets/${ticketId}`),

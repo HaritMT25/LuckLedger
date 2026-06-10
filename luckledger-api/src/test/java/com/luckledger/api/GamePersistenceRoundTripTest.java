@@ -83,7 +83,7 @@ class GamePersistenceRoundTripTest {
         GameEntity game = games.findById(gameId).orElseThrow();
         assertThat(game.getMechanicType()).isEqualTo(MechanicType.DEMON_SEAL);
         assertThat(game.getTicketPrice()).isEqualByComparingTo("5");
-        assertThat(game.getPayoutRatio()).isEqualByComparingTo("0.30");
+        assertThat(game.getPayoutRatio()).isEqualByComparingTo("0.648");
         assertThat(game.isVerificationPassed()).isTrue();
         assertThat(game.getNearMiss()).isNotNull(); // JSONB report round-tripped
         assertThat(game.getTotalTickets()).isEqualTo(generatedTickets);

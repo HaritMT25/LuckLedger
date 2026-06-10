@@ -54,6 +54,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         TicketController.class,
         PlayerController.class,
         LedgerController.class,
+        HouseController.class,
         GlobalExceptionHandler.class
 })
 @AutoConfigureMockMvc
@@ -130,14 +131,50 @@ class ApiEndpointsIntegrationTest {
         mockMvc.perform(get("/api/games"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].mechanic").value("DEMON_SEAL"))
-                .andExpect(jsonPath("$[0].ticketCount").value(20));
+                .andExpect(jsonPath("$[0].gameName").value("Demon Seal"))
+                .andExpect(jsonPath("$[0].ticketCount").value(500))
+                .andExpect(jsonPath("$[0].ticketPrice").value(5))
+                .andExpect(jsonPath("$[0].topPrize").value(300));
 
         mockMvc.perform(get("/api/games/" + gameId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.mechanic").value("DEMON_SEAL"))
-                .andExpect(jsonPath("$.ticketCount").value(20))
-                .andExpect(jsonPath("$.dealerCount").value(3))
+                .andExpect(jsonPath("$.ticketCount").value(500))
+                .andExpect(jsonPath("$.dealerCount").value(5))
                 .andExpect(jsonPath("$.verificationPassed").value(true));
+    }
+
+    @Test
+    void houseOverviewExposesPoolEconomics() throws Exception {
+        // Before any sale the pool's economics are already fixed: the prize fund is known in full.
+        mockMvc.perform(get("/api/house/overview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.ticketsSold").value(0))
+                .andExpect(jsonPath("$.totals.revenue").value(0))
+                .andExpect(jsonPath("$.games[0].gameName").value("Demon Seal"))
+                .andExpect(jsonPath("$.games[0].totalTickets").value(500))
+                .andExpect(jsonPath("$.games[0].prizeFund").value(1620.0))
+                .andExpect(jsonPath("$.games[0].maxRevenue").value(2500))
+                .andExpect(jsonPath("$.games[0].topPrize").value(300.0))
+                .andExpect(jsonPath("$.games[0].books.total").value(20));
+
+        // A sale and reveal move the running totals.
+        UUID playerId = fundedPlayer();
+        String body = "{\"playerId\":\"" + playerId + "\"}";
+        String purchased = mockMvc.perform(post("/api/books/" + bookId + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = com.jayway.jsonpath.JsonPath.read(purchased, "$.ticketId");
+        mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/house/overview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.ticketsSold").value(1))
+                .andExpect(jsonPath("$.totals.ticketsRevealed").value(1))
+                .andExpect(jsonPath("$.totals.revenue").value(5));
     }
 
     @Test

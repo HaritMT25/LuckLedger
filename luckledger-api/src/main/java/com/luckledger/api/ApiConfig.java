@@ -155,33 +155,45 @@ public class ApiConfig {
 
     // --- seed configs ---------------------------------------------------------
 
-    /** Celestial Fortune demo pool: 200 tickets, prizes $2/$20/$740 (the calibrated CF ladder). */
+    /**
+     * Celestial Fortune seed pool: 1000 tickets at $5 across 25 books. Prizes follow the calibrated
+     * CF ladder ($2 = 2 matches, $20 = 3, $740 = 4); tier cost 1480 + 1300 + 500 = 3280 of 5000
+     * revenue → RTP 65.6%, near the mechanic's natural 65.2%. 317 winners ≈ a realistic ~1-in-3.
+     */
     static GameConfig celestialConfig() {
         PoolContract pool = PoolContract.builder()
-                .totalTickets(200)
+                .totalTickets(1000)
                 .ticketPrice(new BigDecimal("5"))
-                .payoutRatio(new BigDecimal("0.88")) // 880 tier cost / 1000 revenue
-                .addPrizeTier(new PrizeTier(new BigDecimal("740"), 1, "Jackpot"))
-                .addPrizeTier(new PrizeTier(new BigDecimal("20"), 5, "Mid"))
-                .addPrizeTier(new PrizeTier(new BigDecimal("2"), 20, "Consolation"))
+                .payoutRatio(new BigDecimal("0.656")) // 3280 tier cost / 5000 revenue
+                .addPrizeTier(new PrizeTier(new BigDecimal("740"), 2, "Jackpot"))
+                .addPrizeTier(new PrizeTier(new BigDecimal("20"), 65, "Mid"))
+                .addPrizeTier(new PrizeTier(new BigDecimal("2"), 250, "Consolation"))
                 .minPayout(BigDecimal.ZERO)
                 .bookProfile(BookProfile.BALANCED)
                 .build();
-        return new GameConfig(pool, MechanicType.CELESTIAL_FORTUNE, CELESTIAL_THEME_ID, 10, 5);
+        return new GameConfig(pool, MechanicType.CELESTIAL_FORTUNE, CELESTIAL_THEME_ID, 25, 4);
     }
 
-    /** Demon Seal demo pool: 20 tickets, prizes $2/$10. */
+    /**
+     * Demon Seal seed pool: 500 tickets at $5 across 20 books. Prizes sit on the calibrated DS
+     * T-score ladder ($2/$4/$10/$25/$100/$300); tier cost 600 + 200 + 200 + 300 + 160 + 160 = 1620
+     * of 2500 revenue → RTP 64.8%, near the mechanic's natural 64.4%. 162 winners ≈ ~1-in-3.
+     */
     static GameConfig demonConfig() {
         PoolContract pool = PoolContract.builder()
-                .totalTickets(20)
+                .totalTickets(500)
                 .ticketPrice(new BigDecimal("5"))
-                .payoutRatio(new BigDecimal("0.30")) // 30 tier cost / 100 revenue
-                .addPrizeTier(new PrizeTier(new BigDecimal("10"), 2, "Sealed-M"))
-                .addPrizeTier(new PrizeTier(new BigDecimal("2"), 5, "Consolation"))
+                .payoutRatio(new BigDecimal("0.648")) // 1620 tier cost / 2500 revenue
+                .addPrizeTier(new PrizeTier(new BigDecimal("300"), 2, "Killed-M"))
+                .addPrizeTier(new PrizeTier(new BigDecimal("100"), 2, "Killed-S"))
+                .addPrizeTier(new PrizeTier(new BigDecimal("25"), 8, "Sealed-L"))
+                .addPrizeTier(new PrizeTier(new BigDecimal("10"), 30, "Sealed-M"))
+                .addPrizeTier(new PrizeTier(new BigDecimal("4"), 40, "Sealed-S"))
+                .addPrizeTier(new PrizeTier(new BigDecimal("2"), 80, "Consolation"))
                 .minPayout(BigDecimal.ZERO)
                 .bookProfile(BookProfile.BALANCED)
                 .build();
-        return new GameConfig(pool, MechanicType.DEMON_SEAL, DEMON_THEME_ID, 4, 3);
+        return new GameConfig(pool, MechanicType.DEMON_SEAL, DEMON_THEME_ID, 20, 5);
     }
 
     private static ThemeRef theme(String id, String name, List<String> symbols) {

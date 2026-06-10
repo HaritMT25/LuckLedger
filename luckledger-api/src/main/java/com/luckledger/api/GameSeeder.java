@@ -78,7 +78,9 @@ public class GameSeeder implements ApplicationRunner {
         DealerEntity sevenStar = shop("7 Star Corner", "Priya", List.of(celestialId), 20);          // TIER_2
         DealerEntity goldenExpress = shop("Golden Express", "Old Chen", List.of(celestialId, demonId), 0); // TIER_1
         DealerEntity quickStop = shop("QuickStop", "Danny", List.of(demonId), 20);                  // TIER_2
-        List<DealerEntity> roster = List.of(luckyMart, sevenStar, goldenExpress, quickStop);
+        DealerEntity moonlight = shop("Moonlight Bodega", "Rosa", List.of(celestialId, demonId), 60); // TIER_3
+        DealerEntity nightOwl = shop("Night Owl Mart", "Theo", List.of(demonId), 0);                // TIER_1
+        List<DealerEntity> roster = List.of(luckyMart, sevenStar, goldenExpress, quickStop, moonlight, nightOwl);
         dealers.saveAll(roster);
 
         seed(ApiConfig.celestialConfig(), celestialOrchestrator, celestialId, stockedBy(roster, celestialId));
