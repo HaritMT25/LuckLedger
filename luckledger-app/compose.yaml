@@ -1,6 +1,11 @@
 # Local-development Postgres for LuckLedger. Spring Boot's docker-compose support
 # (luckledger-app) auto-starts this on `mvn spring-boot:run` and wires the datasource.
 # Tests use their own Testcontainers instance and ignore this file.
+#
+# Data persists in a named volume so app restarts keep the same games, players, and
+# tickets — without it every restart reseeded fresh UUIDs and any id a browser had
+# cached (player, pending ticket) dangled. The GameSeeder is idempotent, so reusing
+# the volume never double-seeds. `docker volume rm luckledger_pgdata` for a clean slate.
 services:
   postgres:
     image: postgres:17
@@ -10,3 +15,9 @@ services:
       POSTGRES_PASSWORD: luckledger
     ports:
       - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+    name: luckledger_pgdata

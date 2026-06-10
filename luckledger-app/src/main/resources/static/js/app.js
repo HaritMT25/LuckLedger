@@ -26,6 +26,8 @@ const state = {
 const view = document.getElementById('view');
 const PLAYER_KEY = 'luckledger.playerId';
 const PENDING_KEY = 'luckledger.pendingTicket';
+const REDUCED_MOTION = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -78,13 +80,20 @@ async function ensurePlayer() {
     localStorage.setItem(PLAYER_KEY, state.player.playerId);
 }
 
+let _lastBalance = null;
+
 function renderPlayerBar() {
     const bar = document.getElementById('player-bar');
     const p = state.player;
     if (!p) { bar.innerHTML = ''; return; }
+    const balance = Number(p.coinBalance);
+    const moved = _lastBalance !== null && balance !== _lastBalance;
+    const dir = moved && balance > _lastBalance ? 'up' : 'down';
+    _lastBalance = balance;
     bar.innerHTML = `
         <span class="player-chip">${escapeHtml(p.displayName)}</span>
-        <span class="player-chip">Balance <strong>${money(p.coinBalance)}</strong> coins</span>
+        <span class="player-chip balance${moved ? ` bump ${dir}` : ''}">Balance
+            <strong>${money(p.coinBalance)}</strong> coins</span>
         <button class="btn secondary" id="borrow-btn">Borrow 100</button>`;
     document.getElementById('borrow-btn').onclick = async () => {
         try {
@@ -98,6 +107,79 @@ function renderPlayerBar() {
 function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** Shimmering placeholder cards shown while a list view loads. */
+function skeletonCards(n) {
+    return `<div class="grid">${Array.from({ length: n }, () => `
+        <div class="card skel">
+            <div class="skel-line w60"></div>
+            <div class="skel-line w90"></div>
+            <div class="skel-line w40"></div>
+        </div>`).join('')}</div>`;
+}
+
+/* Holo-foil tilt (poke-holo style): pointer position drives CSS vars that rotate the card and move a
+   glare + rainbow sheen. The card snaps flat the instant a scratch stroke starts so canvas coordinates
+   stay exact. Skipped entirely under prefers-reduced-motion. */
+function attachHoloTilt(el) {
+    if (REDUCED_MOTION) return;
+    const set = (rx, ry, mx, my, o) => {
+        el.style.setProperty('--rx', `${rx}deg`);
+        el.style.setProperty('--ry', `${ry}deg`);
+        el.style.setProperty('--mx', `${mx}%`);
+        el.style.setProperty('--my', `${my}%`);
+        el.style.setProperty('--holo-o', o);
+    };
+    const flat = () => set(0, 0, 50, 50, 0);
+    el.addEventListener('pointermove', (e) => {
+        if (e.buttons) { flat(); return; } // mid-scratch: keep the card flat
+        const r = el.getBoundingClientRect();
+        const px = (e.clientX - r.left) / r.width;
+        const py = (e.clientY - r.top) / r.height;
+        set((py - 0.5) * -7, (px - 0.5) * 9, px * 100, py * 100, 1);
+    });
+    el.addEventListener('pointerdown', flat);
+    el.addEventListener('pointerleave', flat);
+}
+
+/** A short confetti burst inside the scratch stage — the win moment. */
+function burstConfetti(stage) {
+    if (REDUCED_MOTION || !stage) return;
+    const c = document.createElement('canvas');
+    c.className = 'confetti';
+    c.width = stage.clientWidth || 360;
+    c.height = stage.clientHeight || 640;
+    stage.appendChild(c);
+    const ctx = c.getContext('2d');
+    const COLORS = ['#f3c969', '#ffd700', '#8b5cf6', '#ffffff', '#4ade80'];
+    const parts = Array.from({ length: 90 }, () => ({
+        x: c.width / 2, y: c.height * 0.55,
+        vx: (Math.random() - 0.5) * 9, vy: -4 - Math.random() * 7,
+        s: 3 + Math.random() * 4, rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.3,
+        col: COLORS[(Math.random() * COLORS.length) | 0],
+        life: 70 + Math.random() * 50,
+    }));
+    let frame = 0;
+    (function tick() {
+        frame++;
+        ctx.clearRect(0, 0, c.width, c.height);
+        let alive = 0;
+        for (const p of parts) {
+            if (frame > p.life) continue;
+            alive++;
+            p.x += p.vx; p.y += p.vy; p.vy += 0.22; p.rot += p.vr;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rot);
+            ctx.globalAlpha = Math.max(0, 1 - frame / p.life);
+            ctx.fillStyle = p.col;
+            ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.6);
+            ctx.restore();
+        }
+        if (alive) requestAnimationFrame(tick); else c.remove();
+    })();
 }
 
 // ---- shops -----------------------------------------------------------------
@@ -119,10 +201,12 @@ function avatarHtml(dealer) {
 async function renderDealers() {
     view.innerHTML = `<div class="section-title"><h2>Shops</h2>
         <span class="hint">NPC storefronts, each run by an owner. Tap a shop to see what it stocks.</span></div>
-        <div class="grid" id="grid"><p class="empty">Loading…</p></div>`;
+        <div id="grid">${skeletonCards(6)}</div>`;
     try {
         const dealers = await Api.dealers();
         const grid = document.getElementById('grid');
+        if (!grid) return; // navigated away
+        grid.className = 'grid';
         if (!dealers.length) { grid.innerHTML = `<p class="empty">No shops seeded.</p>`; return; }
         grid.innerHTML = dealers.map((d) => `
             <div class="card shop-card" data-dealer="${d.dealerId}" role="button" tabindex="0">
@@ -157,7 +241,7 @@ async function renderDealerBooks(dealerId) {
     state.lastShop = dealerId; // so "Buy another" returns to this shop
     view.innerHTML = `<div class="section-title"><h2>Shop</h2>
         <span class="hint"><a href="#dealer">← All shops</a></span></div>
-        <div id="shop-body"><p class="empty">Loading…</p></div>`;
+        <div id="shop-body">${skeletonCards(3)}</div>`;
     try {
         const [dealer, mine] = await Promise.all([Api.dealer(dealerId), Api.dealerBooks(dealerId)]);
         const body = document.getElementById('shop-body');
@@ -188,7 +272,7 @@ async function renderDealerBooks(dealerId) {
         }
         body.innerHTML = html;
         body.querySelectorAll('button[data-book]').forEach((btn) => {
-            btn.onclick = () => buyTicket(btn.dataset.book);
+            btn.onclick = () => buyTicket(btn.dataset.book, btn.dataset.mechanic, btn);
         });
     } catch (e) {
         const body = document.getElementById('shop-body');
@@ -211,21 +295,26 @@ function bookCard(b, i) {
                 <div class="stock-fill" style="width:${pct}%"></div>
             </div>
             <p class="stock-label">${soldOut ? 'Sold out' : `${b.ticketsRemaining} of ${b.totalTickets} tickets left`}</p>
-            <button class="btn block" data-book="${b.bookId}" ${soldOut ? 'disabled' : ''}>
+            <button class="btn block" data-book="${b.bookId}" data-mechanic="${escapeHtml(b.mechanic || '')}"
+                ${soldOut ? 'disabled' : ''}>
                 ${soldOut ? 'Sold out' : `Buy a ticket — ${money(b.ticketPrice)} coins`}</button>
         </div>`;
 }
 
-async function buyTicket(bookId) {
+async function buyTicket(bookId, mechanic, btn) {
     if (!state.player) return;
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Buying…'; }
     try {
         const result = await Api.purchase(bookId, state.player.playerId);
-        await refreshPlayer();
-        const ticket = await Api.ticket(result.ticketId);
-        setPendingTicket({ ticketId: ticket.ticketId, mechanic: ticket.mechanic });
+        refreshPlayer().catch(() => {});
+        // The book card already knows its mechanic; only fall back to a ticket fetch without it.
+        if (!mechanic) mechanic = (await Api.ticket(result.ticketId)).mechanic;
+        setPendingTicket({ ticketId: result.ticketId, mechanic });
         toast(`Bought a ticket for ${money(result.coinsDeducted)} coins. Scratch it!`);
         location.hash = '#scratch';
     } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = label; }
         if (e.code === 'INSUFFICIENT_BALANCE') toast('Not enough coins — borrow some first.', true);
         else if (e.code === 'BOOK_DEPLETED') toast('That book is sold out.', true);
         else toast(e.message, true);
@@ -278,7 +367,8 @@ function demonZoneSeals(grid) {
     return { byZone, gold, silver, score: 2 * gold + silver };
 }
 
-/* Renders the ticket's REAL hidden values into the dark reveal layer, one element per scratch zone. */
+/* Renders the ticket's REAL hidden values into the dark reveal layer, one element per scratch zone.
+   Each element carries its zone id so the scratch engine's 'zonereveal' events can pop it. */
 function drawRevealLayer(layer, zones, mechanic, gridData) {
     layer.innerHTML = '';
     for (const z of zones) {
@@ -296,6 +386,7 @@ function drawRevealLayer(layer, zones, mechanic, gridData) {
             el.className = 'value-label' + (v.kind !== 'plain' ? ` ${v.kind}` : '');
             el.textContent = v.text;
         }
+        el.dataset.zone = z.id;
         el.style.left = `${cx * 100}%`;
         el.style.top = `${cy * 100}%`;
         layer.appendChild(el);
@@ -332,13 +423,17 @@ async function renderScratch() {
         <div class="section-title"><h2>Scratch your ticket</h2>
             <span class="hint">${t.mechanic.replace(/_/g, ' ')}</span></div>
         <div class="scratch-wrap">
-            <div class="scratch-stage">
+            <div class="scratch-stage holo" id="stage">
                 <div id="reveal-layer" class="reveal-layer"></div>
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
+                <div class="holo-sheen"></div>
+                <div class="holo-glare"></div>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
-            <p class="scratch-instructions">Scratch each panel to uncover what this ticket was always going to be.</p>
+            <p class="scratch-instructions" id="scratch-progress">Scratch each panel to uncover what this
+                ticket was always going to be.</p>
             <div class="scratch-actions">
+                <button class="btn ghost" id="reveal-all">Reveal everything</button>
                 <button class="btn secondary" id="buy-another" hidden>Buy another</button>
                 <a class="btn secondary" id="see-ledger" href="#ledger" hidden>See your ledger</a>
             </div>
@@ -367,9 +462,11 @@ async function renderScratch() {
     }
     if (!document.getElementById('reveal-layer')) return; // navigated away during the await
     if (!outcome || !outcome.grid) {
-        view.querySelector('.scratch-wrap').innerHTML =
-            `<p class="empty">Could not load this ticket. <a href="#scratch">Try again</a>.</p>`;
-        return;
+        // Stale reference (e.g. the demo DB was reset and this id no longer exists). Drop it and fall
+        // back to the server-side pending list — never trap the player on a dead ticket.
+        setPendingTicket(null);
+        toast('That ticket could not be loaded — it may be from an older session.', true);
+        return renderPendingTickets();
     }
 
     const won = !!(outcome.isWinner ?? outcome.winner) && Number(outcome.prizeAmount || 0) > 0;
@@ -382,13 +479,27 @@ async function renderScratch() {
         showResult(outcome, won, outcomeDetail(t.mechanic, gridData, won));
         await refreshPlayer();
     };
-    initScratch(canvas, art, onReveal);
+    const controller = initScratch(canvas, art, onReveal);
+
+    // Per-zone feedback: pop the uncovered tile and advance the progress line.
+    canvas.addEventListener('zonereveal', (e) => {
+        const tile = revealLayer.querySelector(`[data-zone="${e.detail.zoneId}"]`);
+        if (tile) tile.classList.add('revealed');
+        const progress = document.getElementById('scratch-progress');
+        if (progress && e.detail.total) {
+            progress.textContent = `${e.detail.revealed} of ${e.detail.total} panels revealed`;
+        }
+    });
+    const revealAllBtn = document.getElementById('reveal-all');
+    if (revealAllBtn) revealAllBtn.onclick = () => controller.revealAll();
+
+    attachHoloTilt(document.getElementById('stage'));
 }
 
 /** No ticket in hand: offer any bought-but-unscratched tickets to resume, else point at the shops. */
 async function renderPendingTickets() {
     view.innerHTML = `<div class="section-title"><h2>Scratch</h2></div>
-        <div id="pending-body"><p class="empty">Loading…</p></div>`;
+        <div id="pending-body">${skeletonCards(2)}</div>`;
     let pending = [];
     try {
         if (state.player) pending = await Api.pendingTickets(state.player.playerId);
@@ -428,6 +539,9 @@ function showResult(outcome, won, detail) {
         ${detail ? `<div class="result-detail">${escapeHtml(detail)}</div>` : ''}
         <div class="result-edu" id="result-edu"></div>`;
     banner.hidden = false;
+    if (won) burstConfetti(document.getElementById('stage'));
+    const revealAllBtn = document.getElementById('reveal-all');
+    if (revealAllBtn) revealAllBtn.hidden = true;
     const again = document.getElementById('buy-another');
     const ledger = document.getElementById('see-ledger');
     again.hidden = false;
@@ -455,7 +569,7 @@ async function renderLedger() {
     if (!state.player) return;
     view.innerHTML = `<div class="section-title"><h2>Your ledger</h2>
         <span class="hint">Every coin movement, and what the numbers really say.</span></div>
-        <div id="ledger-body"><p class="empty">Loading…</p></div>`;
+        <div id="ledger-body">${skeletonCards(3)}</div>`;
     try {
         const pid = state.player.playerId;
         const [p, txns, insights, curve, dealerCmp] = await Promise.all([
@@ -576,6 +690,10 @@ function route() {
     const [name, param] = raw.split('/');
     document.querySelectorAll('.tabs a').forEach((a) =>
         a.classList.toggle('active', a.dataset.route === name));
+    // Re-trigger the view entrance animation on every route change.
+    view.classList.remove('view-enter');
+    void view.offsetWidth;
+    view.classList.add('view-enter');
     if (name === 'dealer' && param) { renderDealerBooks(decodeURIComponent(param)); return; }
     (ROUTES[name] || renderDealers)();
 }

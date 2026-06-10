@@ -84,6 +84,8 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         return total ? clear / total : 0;
     }
     // Lift a zone's remaining coating and mark it revealed; fire onReveal once every zone is open.
+    // Each clear announces itself as a 'zonereveal' event on the canvas so the UI can pop the
+    // uncovered tile and advance a progress count.
     function _revealZone(z) {
         if (revealedZones.has(z.id)) return;
         ctx.save();
@@ -93,6 +95,9 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         ctx.fill();
         ctx.restore();
         revealedZones.add(z.id);
+        canvas.dispatchEvent(new CustomEvent('zonereveal', {
+            detail: { zoneId: z.id, revealed: revealedZones.size, total: zones.length },
+        }));
         if (zones.length && revealedZones.size >= zones.length && !revealed) {
             revealed = true;
             onReveal();
@@ -267,6 +272,18 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
     canvas.addEventListener('pointerleave', () => { scratching = false; last = null; lastZoneId = null; });
 
     return {
+        /** Lifts all remaining coating at once (the "reveal everything" shortcut); fires onReveal. */
+        revealAll() {
+            if (revealed || !loaded) return;
+            if (zones && zones.length) {
+                for (const z of zones) _revealZone(z); // the last zone fires onReveal
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.clearRect(0, 0, W, H);
+                revealed = true;
+                onReveal();
+            }
+        },
         reset() {
             revealed = false;
             scratching = false;
