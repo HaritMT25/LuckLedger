@@ -49,6 +49,10 @@ public class TicketEntity {
     @Column(nullable = false, length = 20)
     private TicketStatus status;
 
+    /** The buyer; null until the ticket is sold. Lets a player recover unscratched tickets. */
+    @Column(name = "player_id")
+    private UUID playerId;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")
     private GridCodec.GridDto grid;
@@ -92,6 +96,7 @@ public class TicketEntity {
     public BigDecimal getPrizeAmount() { return prizeAmount; }
     public Integer getPositionInBook() { return positionInBook; }
     public TicketStatus getStatus() { return status; }
+    public UUID getPlayerId() { return playerId; }
     public GridCodec.GridDto getGrid() { return grid; }
     public GridCodec.ThemedGridDto getSkinnedGrid() { return skinnedGrid; }
     public boolean isRevealed() { return revealed; }
@@ -99,6 +104,9 @@ public class TicketEntity {
     public BigDecimal getRevealedPrize() { return revealedPrize; }
 
     public void setStatus(TicketStatus status) { this.status = status; }
+
+    /** Records the buyer at sale time, in the same transaction that marks the ticket SOLD. */
+    public void setPlayerId(UUID playerId) { this.playerId = playerId; }
 
     /** Marks the ticket revealed and records the outcome. Idempotent callers should check first. */
     public void markRevealed(boolean isWinner, BigDecimal prize) {

@@ -94,6 +94,7 @@ public class PurchaseGateway {
                 .orElseThrow(() -> new NoSuchElementException(
                         "book " + bookId + " has no ticket at position " + book.getNextIndex()));
         ticket.setStatus(TicketStatus.SOLD);
+        ticket.setPlayerId(playerId);
         tickets.save(ticket);
 
         book.setNextIndex(book.getNextIndex() + 1);

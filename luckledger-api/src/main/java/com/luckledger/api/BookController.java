@@ -1,6 +1,8 @@
 package com.luckledger.api;
 
+import com.luckledger.api.persistence.GameEntity;
 import com.luckledger.api.persistence.TicketBookEntity;
+import java.math.BigDecimal;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,17 +29,18 @@ public class BookController {
     @GetMapping("/{bookId}")
     public BookDto get(@PathVariable UUID bookId) {
         TicketBookEntity book = gameStore.book(bookId);
-        return toDto(book, DealerController.gameName(gameStore.game(book.getGameId())));
+        return toDto(book, gameStore.game(book.getGameId()));
     }
 
     /** Builds the metadata DTO for a book; shared with {@link DealerController}'s per-shop listing. */
-    static BookDto toDto(TicketBookEntity book, String gameName) {
+    static BookDto toDto(TicketBookEntity book, GameEntity game) {
         int remaining = book.getTotalTickets() - book.getNextIndex();
-        return new BookDto(book.getId(), book.getDealerId(), book.getGameId(), gameName,
+        return new BookDto(book.getId(), book.getDealerId(), book.getGameId(),
+                DealerController.gameName(game), game.getMechanicType().name(), game.getTicketPrice(),
                 book.getPoolContractId(), book.getTotalTickets(), remaining);
     }
 
-    /** Metadata only — no ticket list, no per-ticket prize. */
-    public record BookDto(UUID bookId, UUID dealerId, UUID gameId, String gameName, UUID poolContractId,
-            int totalTickets, int ticketsRemaining) {}
+    /** Metadata plus the up-front price — still no ticket list and no per-ticket prize. */
+    public record BookDto(UUID bookId, UUID dealerId, UUID gameId, String gameName, String mechanic,
+            BigDecimal ticketPrice, UUID poolContractId, int totalTickets, int ticketsRemaining) {}
 }

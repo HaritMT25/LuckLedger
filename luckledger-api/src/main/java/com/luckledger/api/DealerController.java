@@ -39,9 +39,10 @@ public class DealerController {
     @GetMapping("/{dealerId}/books")
     public List<BookController.BookDto> books(@PathVariable UUID dealerId) {
         gameStore.dealer(dealerId); // 404 if the shop does not exist
-        Map<UUID, String> gameNames = gameNameIndex();
+        Map<UUID, GameEntity> gamesById = gameStore.games().stream()
+                .collect(Collectors.toMap(GameEntity::getId, g -> g));
         return gameStore.booksForDealer(dealerId).stream()
-                .map(b -> BookController.toDto(b, gameNames.getOrDefault(b.getGameId(), "Unknown game")))
+                .map(b -> BookController.toDto(b, gamesById.get(b.getGameId())))
                 .toList();
     }
 

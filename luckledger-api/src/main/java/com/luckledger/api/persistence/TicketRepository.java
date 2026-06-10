@@ -14,4 +14,7 @@ public interface TicketRepository extends JpaRepository<TicketEntity, UUID> {
 
     /** The ticket at a given sale position within a book (used to draw the next ticket). */
     Optional<TicketEntity> findByBookIdAndPositionInBook(UUID bookId, int positionInBook);
+
+    /** A player's bought-but-unscratched tickets (recovery after a refresh); stable id order. */
+    List<TicketEntity> findByPlayerIdAndRevealedFalseOrderByIdAsc(UUID playerId);
 }

@@ -4,11 +4,10 @@
  * calibrated zones in config/scratch-zones.json: a pointer only lifts coating within the zone it is
  * currently inside (each stroke is clipped to that zone's circle/rect), so the spaces between zones,
  * the title, badges and the centre demon stay covered. Each zone tracks its own scratched fraction and
- * clears independently once ~70% of *its* coating is gone, uncovering the reveal layer beneath:
- *   - CELESTIAL_FORTUNE → the number labels app.js renders into #reveal-layer
- *   - DEMON_SEAL        → gold / silver / broken seal tiles (this file swaps app.js's labels for them)
- * When every zone has revealed, `onReveal` fires exactly once. If the zone config can't be matched the
- * engine falls back to the legacy whole-surface scratch so the card still works. */
+ * clears independently once ~70% of *its* coating is gone, uncovering the reveal layer beneath — the
+ * ticket's real values (numbers or seal tiles), which app.js renders into #reveal-layer from the grid
+ * served by the API. When every zone has revealed, `onReveal` fires exactly once. If the zone config
+ * can't be matched the engine falls back to the legacy whole-surface scratch so the card still works. */
 
 /**
  * Initialise a scratch surface on a canvas, using a ticket PNG as the full coating.
@@ -35,16 +34,8 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
     // ----- Per-zone scratch model ---------------------------------------------------------------
     let zones = null;          // array of scratchable zones once loaded; null while loading
     let zonesFailed = false;   // true if config missing/unmatched => fall back to whole-surface scratch
-    let mechanic = null;       // 'CELESTIAL_FORTUNE' | 'DEMON_SEAL' | ...
     let lastZoneId = null;     // zone the last stroke was in, so the line never bridges across a gap
     const revealedZones = new Set();
-
-    // Tiny deterministic RNG (fnv1a seed → mulberry32) so a ticket's seal reveals are stable on redraw.
-    function _rng(seedStr) {
-        let h = 2166136261 >>> 0;
-        for (let i = 0; i < seedStr.length; i++) { h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
-        return function () { h += 0x6D2B79F5; let t = Math.imul(h ^ (h >>> 15), 1 | h); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-    }
 
     // Zone geometry in canvas pixels. Circles: cx/cy fractions of W/H, r a fraction of W. Rects:
     // x/w fractions of W, y/h fractions of H. (Matches the scratch-zones.json note.)
@@ -108,31 +99,6 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         }
     }
 
-    // Demon Seal reveals SEAL ICONS (gold / silver / broken), not numbers. app.js seeds #reveal-layer
-    // with one label per zone ('★' for every zone on a winning ticket, otherwise numbers); we read that
-    // to stay consistent with win/loss, then replace the labels with seal-icon tiles at each zone centre.
-    function _renderSealReveals() {
-        const layer = document.getElementById('reveal-layer');
-        if (!layer || !zones) return;
-        const labels = [...layer.querySelectorAll('.value-label')];
-        const won = labels.length > 0 && labels.every((s) => s.textContent.trim() === '★');
-        const rng = _rng((labels.map((s) => s.textContent).join('|') || pngPath) + ':seal');
-        const pool = won ? ['GOLD', 'GOLD', 'SILVER'] : ['SILVER', 'BROKEN', 'BROKEN'];
-        const ICON = { GOLD: '✦', SILVER: '✧', BROKEN: '✗' };
-        layer.innerHTML = '';
-        zones.forEach((z, i) => {
-            const cx = z.shape === 'circle' ? z.cx : z.x + z.w / 2;
-            const cy = z.shape === 'circle' ? z.cy : z.y + z.h / 2;
-            const kind = (won && i === 0) ? 'GOLD' : pool[Math.floor(rng() * pool.length)]; // guarantee gold on a win
-            const tile = document.createElement('div');
-            tile.className = 'seal-reveal ' + kind.toLowerCase();
-            tile.style.left = `${cx * 100}%`;
-            tile.style.top = `${cy * 100}%`;
-            tile.innerHTML = `<span class="seal-icon">${ICON[kind]}</span><span class="seal-label">${kind}</span>`;
-            layer.appendChild(tile);
-        });
-    }
-
     // Identify the mechanic from the ticket PNG filename, then load that ticket's scratch zones.
     function _loadZones() {
         fetch('config/scratch-zones.json')
@@ -140,15 +106,13 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
             .then((cfg) => {
                 const tickets = (cfg && cfg.tickets) || {};
                 const file = pngPath.split('/').pop();
-                for (const [key, t] of Object.entries(tickets)) {
+                for (const t of Object.values(tickets)) {
                     if (t.image && t.image.split('/').pop() === file) {
-                        mechanic = key;
                         zones = (t.zones || []).filter((z) => z.scratch && z.shape !== 'path');
                         break;
                     }
                 }
-                if (!zones) { zonesFailed = true; return; } // unmatched PNG => legacy whole-surface scratch
-                if (mechanic === 'DEMON_SEAL') _renderSealReveals();
+                if (!zones) { zonesFailed = true; } // unmatched PNG => legacy whole-surface scratch
             })
             .catch(() => { zonesFailed = true; });
     }

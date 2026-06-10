@@ -1,5 +1,6 @@
 package com.luckledger.api;
 
+import com.luckledger.api.persistence.GridCodec;
 import com.luckledger.api.persistence.PlayerEntity;
 import com.luckledger.api.persistence.PlayerMapper;
 import com.luckledger.api.persistence.PlayerRepository;
@@ -41,8 +42,13 @@ public class RevealGateway {
         this.recorder = recorder;
     }
 
-    /** The outcome of a reveal, enough for the masked/revealed ticket view. */
-    public record RevealOutcome(UUID ticketId, MechanicType mechanicType, boolean winner, BigDecimal prizeAmount) {}
+    /**
+     * The outcome of a reveal: the win/prize flags plus the ticket's themed grid, so the frontend can
+     * draw the player's real symbols under the scratch coating. The grid was verified at generation
+     * time; serving it after reveal leaks nothing about unsold tickets.
+     */
+    public record RevealOutcome(UUID ticketId, UUID gameId, MechanicType mechanicType, boolean winner,
+            BigDecimal prizeAmount, GridCodec.ThemedGridDto skinnedGrid) {}
 
     /**
      * Reveals a ticket, crediting {@code playerId} and recording a WIN if it wins. Idempotent per ticket.
@@ -58,8 +64,9 @@ public class RevealGateway {
                 .orElseThrow(() -> new NoSuchElementException("no ticket with id " + ticketId));
         if (ticket.isRevealed()) {
             return new RevealOutcome(
-                    ticketId, ticket.getMechanicType(), Boolean.TRUE.equals(ticket.getRevealedIsWinner()),
-                    ticket.getRevealedPrize());
+                    ticketId, ticket.getGameId(), ticket.getMechanicType(),
+                    Boolean.TRUE.equals(ticket.getRevealedIsWinner()), ticket.getRevealedPrize(),
+                    ticket.getSkinnedGrid());
         }
 
         BigDecimal prize = ticket.getPrizeAmount();
@@ -78,6 +85,7 @@ public class RevealGateway {
 
         ticket.markRevealed(winner, prize);
         tickets.save(ticket);
-        return new RevealOutcome(ticketId, ticket.getMechanicType(), winner, prize);
+        return new RevealOutcome(
+                ticketId, ticket.getGameId(), ticket.getMechanicType(), winner, prize, ticket.getSkinnedGrid());
     }
 }

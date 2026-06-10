@@ -35,13 +35,17 @@ const Api = (() => {
         dealer: (id) => request('GET', `/dealers/${id}`),
         dealerBooks: (id) => request('GET', `/dealers/${id}/books`),
         games: () => request('GET', '/games'),
+        nearMisses: (gameId) => request('GET', `/games/${gameId}/near-misses`),
         // play
         purchase: (bookId, playerId) => request('POST', `/books/${bookId}/purchase`, { playerId }),
         ticket: (ticketId) => request('GET', `/tickets/${ticketId}`),
         reveal: (ticketId, playerId) => request('POST', `/tickets/${ticketId}/reveal`, { playerId }),
+        pendingTickets: (playerId) => request('GET', `/players/${playerId}/tickets`),
         // ledger
         snapshot: (playerId) => request('GET', `/ledger/${playerId}`),
         transactions: (playerId, limit) => request('GET', `/ledger/${playerId}/transactions${limit ? `?limit=${limit}` : ''}`),
         insights: (playerId) => request('GET', `/ledger/${playerId}/insights`),
+        curve: (playerId) => request('GET', `/ledger/${playerId}/curve`),
+        dealerComparison: (playerId) => request('GET', `/ledger/${playerId}/dealer-comparison`),
     };
 })();

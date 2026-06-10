@@ -168,7 +168,9 @@ class ApiEndpointsIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].totalTickets").isNumber())
                 .andExpect(jsonPath("$[0].ticketsRemaining").isNumber())
-                .andExpect(jsonPath("$[0].gameName").value("Demon Seal"));
+                .andExpect(jsonPath("$[0].gameName").value("Demon Seal"))
+                .andExpect(jsonPath("$[0].mechanic").value("DEMON_SEAL"))
+                .andExpect(jsonPath("$[0].ticketPrice").value(5)); // price shown before buying
 
         mockMvc.perform(get("/api/books/" + bookId))
                 .andExpect(status().isOk())
@@ -258,26 +260,70 @@ class ApiEndpointsIntegrationTest {
 
     @Test
     void ticketIsMaskedBeforeRevealThenRevealedIdempotently() throws Exception {
+        // Masked: no outcome AND no grid — the client cannot evaluate the ticket early.
         mockMvc.perform(get("/api/tickets/" + firstTicketId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(false))
-                .andExpect(jsonPath("$.isWinner").doesNotExist());
+                .andExpect(jsonPath("$.isWinner").doesNotExist())
+                .andExpect(jsonPath("$.grid").doesNotExist());
 
         String body = "{\"playerId\":\"" + fundedPlayer() + "\"}";
         mockMvc.perform(post("/api/tickets/" + firstTicketId + "/reveal")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(true))
-                .andExpect(jsonPath("$.isWinner").exists());
+                .andExpect(jsonPath("$.isWinner").exists())
+                // Revealed: the real themed grid is served (a 3x3 Demon Seal grid = 9 cells).
+                .andExpect(jsonPath("$.gameId").value(gameId.toString()))
+                .andExpect(jsonPath("$.grid.dimension").value(3))
+                .andExpect(jsonPath("$.grid.cells.length()").value(9))
+                .andExpect(jsonPath("$.grid.cells[0].abstractSymbol").isNotEmpty());
 
         mockMvc.perform(post("/api/tickets/" + firstTicketId + "/reveal")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.revealed").value(true));
+                .andExpect(jsonPath("$.revealed").value(true))
+                .andExpect(jsonPath("$.grid.cells.length()").value(9));
 
         mockMvc.perform(get("/api/tickets/" + firstTicketId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.revealed").value(true));
+                .andExpect(jsonPath("$.revealed").value(true))
+                .andExpect(jsonPath("$.grid.cells.length()").value(9));
+    }
+
+    @Test
+    void pendingTicketsListsBoughtButUnscratchedTickets() throws Exception {
+        UUID playerId = fundedPlayer();
+        String body = "{\"playerId\":\"" + playerId + "\"}";
+
+        mockMvc.perform(get("/api/players/" + playerId + "/tickets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        String purchased = mockMvc.perform(post("/api/books/" + bookId + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = com.jayway.jsonpath.JsonPath.read(purchased, "$.ticketId");
+
+        // The bought ticket is recoverable (e.g. after a refresh) until it is scratched...
+        mockMvc.perform(get("/api/players/" + playerId + "/tickets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].ticketId").value(ticketId))
+                .andExpect(jsonPath("$[0].mechanic").value("DEMON_SEAL"))
+                .andExpect(jsonPath("$[0].gameName").value("Demon Seal"));
+
+        // ...and drops off the list once revealed.
+        mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/players/" + playerId + "/tickets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        mockMvc.perform(get("/api/players/" + UUID.randomUUID() + "/tickets"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
