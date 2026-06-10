@@ -469,6 +469,10 @@ function outcomeDetail(mechanic, gridData, won) {
 async function renderScratch() {
     const t = loadPendingTicket();
     if (!t) { return renderPendingTickets(); }
+    // A failed init (e.g. server still starting) must not strand the flow on a null player.
+    if (!state.player) {
+        try { await ensurePlayer(); renderPlayerBar(); } catch (e) { /* handled below as transient */ }
+    }
 
     const art = TICKET_ART[t.mechanic] || TICKET_ART.CELESTIAL_FORTUNE;
     // The ticket PNG IS the coating: it is drawn onto the scratch canvas. Beneath the canvas sits the
@@ -509,19 +513,36 @@ async function renderScratch() {
 
     // Reveal server-side up front (idempotent) — this is what serves the ticket's real grid. The
     // result banner is held back until the player has scratched the coating away.
-    let outcome;
+    let outcome = null;
+    let loadError = null;
     try {
+        if (!state.player) throw new Error('player unavailable');
         outcome = await Api.reveal(t.ticketId, state.player.playerId);
     } catch (e) {
-        outcome = await Api.ticket(t.ticketId).catch(() => null);
+        loadError = e;
+        outcome = await Api.ticket(t.ticketId).catch((e2) => { loadError = e2; return null; });
     }
     if (!document.getElementById('reveal-layer')) return; // navigated away during the await
     if (!outcome || !outcome.grid) {
-        // Stale reference (e.g. the demo DB was reset and this id no longer exists). Drop it and fall
-        // back to the server-side pending list — never trap the player on a dead ticket.
-        setPendingTicket(null);
-        toast('That ticket could not be loaded — it may be from an older session.', true);
-        return renderPendingTickets();
+        // Two very different failures land here, and only one should cost the player their ticket:
+        //  - 404: the id no longer exists (the demo database was reset since it was bought).
+        //    Clear it and explain — the server-side pending list is the safety net.
+        //  - anything else (server restarting, network blip): KEEP the ticket and offer a retry.
+        if (loadError && (loadError.status === 404 || loadError.code === 'NOT_FOUND')) {
+            setPendingTicket(null);
+            return renderPendingTickets(
+                'That ticket was bought against an older demo database that has since been reset, '
+                + 'so it no longer exists. It has been cleared — any current tickets appear below.');
+        }
+        const wrap = view.querySelector('.scratch-wrap');
+        if (wrap) {
+            wrap.innerHTML = `<p class="empty">Could not reach the server to load this ticket —
+                it is still yours.</p>
+                <div class="scratch-actions"><button class="btn" id="retry-scratch">Try again</button></div>`;
+            const retry = document.getElementById('retry-scratch');
+            if (retry) retry.onclick = () => renderScratch();
+        }
+        return;
     }
 
     const won = !!(outcome.isWinner ?? outcome.winner) && Number(outcome.prizeAmount || 0) > 0;
@@ -552,8 +573,9 @@ async function renderScratch() {
 }
 
 /** No ticket in hand: offer any bought-but-unscratched tickets to resume, else point at the shops. */
-async function renderPendingTickets() {
+async function renderPendingTickets(notice) {
     view.innerHTML = `<div class="section-title"><h2>Scratch</h2></div>
+        ${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ''}
         <div id="pending-body">${skeletonCards(2)}</div>`;
     let pending = [];
     try {

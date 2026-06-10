@@ -165,6 +165,11 @@ body {
 .hint a, .empty a { color: var(--accent-2); }
 
 .empty { color: var(--muted); padding: 2rem; text-align: center; }
+.notice {
+    background: rgba(243, 201, 105, .07); border: 1px solid var(--gold-soft);
+    border-radius: var(--radius); color: var(--ink);
+    padding: .8rem 1rem; font-size: .88rem; margin: 0 0 1rem;
+}
 
 /* ---- cards & buttons -------------------------------------------------------- */
 
