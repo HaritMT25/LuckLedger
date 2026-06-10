@@ -120,28 +120,111 @@ function skeletonCards(n) {
         </div>`).join('')}</div>`;
 }
 
-/* Holo-foil tilt (poke-holo style): pointer position drives CSS vars that rotate the card and move a
-   glare + rainbow sheen. The card snaps flat the instant a scratch stroke starts so canvas coordinates
-   stay exact. Skipped entirely under prefers-reduced-motion. */
-function attachHoloTilt(el) {
+/* Gentle 3D tilt toward the pointer. The card snaps flat the instant a scratch stroke starts so
+   canvas coordinates stay exact. Skipped entirely under prefers-reduced-motion. */
+function attachTilt(el) {
     if (REDUCED_MOTION) return;
-    const set = (rx, ry, mx, my, o) => {
+    const set = (rx, ry) => {
         el.style.setProperty('--rx', `${rx}deg`);
         el.style.setProperty('--ry', `${ry}deg`);
-        el.style.setProperty('--mx', `${mx}%`);
-        el.style.setProperty('--my', `${my}%`);
-        el.style.setProperty('--holo-o', o);
     };
-    const flat = () => set(0, 0, 50, 50, 0);
+    const flat = () => set(0, 0);
     el.addEventListener('pointermove', (e) => {
         if (e.buttons) { flat(); return; } // mid-scratch: keep the card flat
         const r = el.getBoundingClientRect();
         const px = (e.clientX - r.left) / r.width;
         const py = (e.clientY - r.top) / r.height;
-        set((py - 0.5) * -7, (px - 0.5) * 9, px * 100, py * 100, 1);
+        set((py - 0.5) * -7, (px - 0.5) * 9);
     });
     el.addEventListener('pointerdown', flat);
     el.addEventListener('pointerleave', flat);
+}
+
+/* Stage particle effects (scratchall-style): silver foil shavings thrown off the pointer while
+   scratching, and a small glint burst when a panel's coating clears. One shared rAF loop that
+   sleeps whenever no particle is alive. */
+function createStageFx(fxCanvas) {
+    if (REDUCED_MOTION || !fxCanvas) return { shavings() {}, burst() {} };
+    const ctx = fxCanvas.getContext('2d');
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    const FOIL = ['#cfd3dc', '#aab0bd', '#e8ebf2', '#d9c989'];
+    const parts = [];
+    let raf = null;
+    function loop() {
+        ctx.clearRect(0, 0, W, H);
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const p = parts[i];
+            p.x += p.vx; p.y += p.vy; p.vy += p.g; p.life--;
+            if (p.life <= 0) { parts.splice(i, 1); continue; }
+            const a = Math.min(1, p.life / 18);
+            ctx.globalAlpha = a;
+            if (p.kind === 'glint') { // a 4-point star that shrinks as it fades
+                const s = p.s * a;
+                ctx.strokeStyle = p.col;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(p.x - s, p.y); ctx.lineTo(p.x + s, p.y);
+                ctx.moveTo(p.x, p.y - s); ctx.lineTo(p.x, p.y + s);
+                ctx.stroke();
+            } else { // a foil fleck
+                ctx.fillStyle = p.col;
+                ctx.fillRect(p.x, p.y, p.s, p.s * 0.7);
+            }
+        }
+        ctx.globalAlpha = 1;
+        raf = parts.length ? requestAnimationFrame(loop) : null;
+    }
+    const wake = () => { if (!raf) raf = requestAnimationFrame(loop); };
+    return {
+        shavings(x, y) {
+            for (let i = 0; i < 3; i++) {
+                parts.push({
+                    kind: 'fleck', x, y,
+                    vx: (Math.random() - 0.5) * 2.4, vy: -0.5 - Math.random() * 1.5, g: 0.12,
+                    s: 1.5 + Math.random() * 2.5,
+                    col: FOIL[(Math.random() * FOIL.length) | 0],
+                    life: 24 + Math.random() * 20,
+                });
+            }
+            if (parts.length > 240) parts.splice(0, parts.length - 240); // cap the system
+            wake();
+        },
+        burst(x, y) {
+            for (let i = 0; i < 6; i++) {
+                const ang = Math.random() * Math.PI * 2;
+                const speed = 0.5 + Math.random() * 1.5;
+                parts.push({
+                    kind: 'glint',
+                    x: x + Math.cos(ang) * 6, y: y + Math.sin(ang) * 6,
+                    vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, g: 0,
+                    s: 3 + Math.random() * 4,
+                    col: i % 2 ? '#ffe9a8' : '#ffffff',
+                    life: 22 + Math.random() * 14,
+                });
+            }
+            wake();
+        },
+    };
+}
+
+/* Ambient twinkles: little stars that wink at random spots on the ticket, scratchall-style. The
+   interval kills itself once the stage leaves the DOM. */
+function startTwinkles(stage) {
+    if (REDUCED_MOTION || !stage) return;
+    const spawn = () => {
+        if (!stage.isConnected) { clearInterval(timer); return; }
+        const tw = document.createElement('span');
+        tw.className = 'twinkle';
+        tw.textContent = '✦';
+        tw.style.left = `${8 + Math.random() * 84}%`;
+        tw.style.top = `${6 + Math.random() * 88}%`;
+        tw.style.fontSize = `${8 + Math.random() * 10}px`;
+        stage.appendChild(tw);
+        setTimeout(() => tw.remove(), 1300);
+    };
+    const timer = setInterval(spawn, 650);
+    spawn();
 }
 
 /** A short confetti burst inside the scratch stage — the win moment. */
@@ -365,14 +448,19 @@ async function buyTicket(bookId, mechanic, btn) {
         refreshPlayer().catch(() => {});
         // The book card already knows its mechanic; only fall back to a ticket fetch without it.
         if (!mechanic) mechanic = (await Api.ticket(result.ticketId)).mechanic;
-        setPendingTicket({ ticketId: result.ticketId, mechanic });
+        // bookId rides along so "Buy another" can re-buy from this same book.
+        setPendingTicket({ ticketId: result.ticketId, mechanic, bookId: result.bookId });
         toast(`Bought a ticket for ${money(result.coinsDeducted)} coins. Scratch it!`);
-        location.hash = '#scratch';
+        // Setting an unchanged hash fires no hashchange event, so re-render explicitly.
+        if (location.hash === '#scratch') route();
+        else location.hash = '#scratch';
     } catch (e) {
         if (btn) { btn.disabled = false; btn.textContent = label; }
         if (e.code === 'INSUFFICIENT_BALANCE') toast('Not enough coins — borrow some first.', true);
-        else if (e.code === 'BOOK_DEPLETED') toast('That book is sold out.', true);
-        else toast(e.message, true);
+        else if (e.code === 'BOOK_DEPLETED') {
+            toast('That book is sold out — pick another from the shop.', true);
+            if (state.lastShop) location.hash = `#dealer/${state.lastShop}`;
+        } else toast(e.message, true);
     }
 }
 
@@ -482,11 +570,10 @@ async function renderScratch() {
         <div class="section-title"><h2>Scratch your ticket</h2>
             <span class="hint">${t.mechanic.replace(/_/g, ' ')}</span></div>
         <div class="scratch-wrap">
-            <div class="scratch-stage holo" id="stage">
+            <div class="scratch-stage" id="stage">
                 <div id="reveal-layer" class="reveal-layer"></div>
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
-                <div class="holo-sheen"></div>
-                <div class="holo-glare"></div>
+                <canvas id="fx-canvas" class="fx-canvas" width="360" height="640"></canvas>
                 <div id="banner" class="result-banner" hidden></div>
             </div>
             <p class="scratch-instructions" id="scratch-progress">Scratch each panel to uncover what this
@@ -494,6 +581,7 @@ async function renderScratch() {
             <div class="scratch-actions">
                 <button class="btn ghost" id="reveal-all">Reveal everything</button>
                 <button class="btn secondary" id="buy-another" hidden>Buy another</button>
+                <button class="btn secondary" id="back-shop" hidden>Back to the shop</button>
                 <a class="btn secondary" id="see-ledger" href="#ledger" hidden>See your ledger</a>
             </div>
         </div>`;
@@ -552,15 +640,25 @@ async function renderScratch() {
     drawRevealLayer(revealLayer, zones, t.mechanic, gridData);
 
     const onReveal = async () => {
-        showResult(outcome, won, outcomeDetail(t.mechanic, gridData, won));
+        showResult(outcome, won, outcomeDetail(t.mechanic, gridData, won), t);
         await refreshPlayer();
     };
     const controller = initScratch(canvas, art, onReveal);
+
+    // Particle layer: shavings off the pointer while scratching, a glint burst per cleared panel.
+    const fx = createStageFx(document.getElementById('fx-canvas'));
+    canvas.addEventListener('scratchstroke', (e) => fx.shavings(e.detail.x, e.detail.y));
 
     // Per-zone feedback: pop the uncovered tile and advance the progress line.
     canvas.addEventListener('zonereveal', (e) => {
         const tile = revealLayer.querySelector(`[data-zone="${e.detail.zoneId}"]`);
         if (tile) tile.classList.add('revealed');
+        const zone = zones.find((z) => z.id === e.detail.zoneId);
+        if (zone) {
+            const cx = (zone.shape === 'circle' ? zone.cx : zone.x + zone.w / 2) * canvas.width;
+            const cy = (zone.shape === 'circle' ? zone.cy : zone.y + zone.h / 2) * canvas.height;
+            fx.burst(cx, cy);
+        }
         const progress = document.getElementById('scratch-progress');
         if (progress && e.detail.total) {
             progress.textContent = `${e.detail.revealed} of ${e.detail.total} panels revealed`;
@@ -569,7 +667,8 @@ async function renderScratch() {
     const revealAllBtn = document.getElementById('reveal-all');
     if (revealAllBtn) revealAllBtn.onclick = () => controller.revealAll();
 
-    attachHoloTilt(document.getElementById('stage'));
+    attachTilt(document.getElementById('stage'));
+    startTwinkles(document.getElementById('stage'));
 }
 
 /** No ticket in hand: offer any bought-but-unscratched tickets to resume, else point at the shops. */
@@ -595,19 +694,23 @@ async function renderPendingTickets(notice) {
                 <div class="card pending-card">
                     <h3>${MECHANIC_EMOJI[p.mechanic] || '🎟️'} ${escapeHtml(p.gameName)}</h3>
                     <p class="book-sub">Unscratched ticket</p>
-                    <button class="btn block" data-ticket="${p.ticketId}" data-mechanic="${escapeHtml(p.mechanic)}">
-                        Scratch it</button>
+                    <button class="btn block" data-ticket="${p.ticketId}" data-mechanic="${escapeHtml(p.mechanic)}"
+                        data-book="${p.bookId || ''}">Scratch it</button>
                 </div>`).join('')}
         </div>`;
     body.querySelectorAll('button[data-ticket]').forEach((btn) => {
         btn.onclick = () => {
-            setPendingTicket({ ticketId: btn.dataset.ticket, mechanic: btn.dataset.mechanic });
+            setPendingTicket({
+                ticketId: btn.dataset.ticket,
+                mechanic: btn.dataset.mechanic,
+                bookId: btn.dataset.book || null,
+            });
             renderScratch();
         };
     });
 }
 
-function showResult(outcome, won, detail) {
+function showResult(outcome, won, detail, ticket) {
     const banner = document.getElementById('banner');
     if (!banner) return;
     banner.className = 'result-banner ' + (won ? 'win' : 'lose');
@@ -620,12 +723,26 @@ function showResult(outcome, won, detail) {
     const revealAllBtn = document.getElementById('reveal-all');
     if (revealAllBtn) revealAllBtn.hidden = true;
     const again = document.getElementById('buy-another');
+    const shop = document.getElementById('back-shop');
     const ledger = document.getElementById('see-ledger');
     again.hidden = false;
     ledger.hidden = false;
-    again.onclick = () => {
-        location.hash = state.lastShop ? `#dealer/${state.lastShop}` : '#dealer';
-    };
+    if (shop) shop.hidden = false;
+    // "Buy another" buys the next ticket from the SAME book, straight into a fresh scratch —
+    // exactly the loss-chasing loop the simulator wants the player to feel (and the ledger to show).
+    if (ticket && ticket.bookId) {
+        again.classList.remove('secondary');
+        again.onclick = () => buyTicket(ticket.bookId, ticket.mechanic, again);
+    } else {
+        again.onclick = () => {
+            location.hash = state.lastShop ? `#dealer/${state.lastShop}` : '#dealer';
+        };
+    }
+    if (shop) {
+        shop.onclick = () => {
+            location.hash = state.lastShop ? `#dealer/${state.lastShop}` : '#dealer';
+        };
+    }
     setPendingTicket(null); // consumed
 
     // Losing tickets get the awareness payload: how often this game is built to look "close".

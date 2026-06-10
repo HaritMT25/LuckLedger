@@ -182,8 +182,13 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
 
     // Erase a round dot and, while dragging, a continuous fat line from the previous point. When `zone`
     // is given the erase is clipped to that zone's outline, so only its coating lifts; without a zone
-    // (legacy fallback) the whole surface erases.
+    // (legacy fallback) the whole surface erases. Every other stroke announces its position as a
+    // 'scratchstroke' event so the UI can throw foil shavings off the pointer.
+    let strokeCount = 0;
     function _stroke({ x, y }, zone) {
+        if (++strokeCount % 2 === 0) {
+            canvas.dispatchEvent(new CustomEvent('scratchstroke', { detail: { x, y } }));
+        }
         ctx.save();
         if (zone) { _zonePath(zone); ctx.clip(); }
         ctx.globalCompositeOperation = 'destination-out';
