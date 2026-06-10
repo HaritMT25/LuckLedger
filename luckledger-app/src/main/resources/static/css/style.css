@@ -477,6 +477,27 @@ tbody tr:hover { background: rgba(139, 92, 246, .06); }
 
 /* ---- the house ----------------------------------------------------------------- */
 
+.master-bar { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.login-card { max-width: 380px; margin: 2.5rem auto; }
+.login-card h3 { margin-top: 0; }
+.login-label { display: block; color: var(--muted); font-size: .82rem; margin-bottom: .8rem; }
+.login-input {
+    display: block; width: 100%; margin-top: .3rem;
+    background: var(--bg); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: .55rem .7rem; font-size: .95rem;
+}
+.login-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 92, 246, .25); }
+.login-error { color: var(--bad); font-size: .85rem; margin: 0 0 .6rem; }
+.table-scroll { overflow-x: auto; }
+.net-good { color: var(--good); } .net-bad { color: var(--bad); }
+.grant-cell { white-space: nowrap; }
+.grant-input {
+    width: 80px; background: var(--bg); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 8px; padding: .35rem .5rem;
+    margin-right: .35rem; font-size: .85rem;
+}
+.restock-btn { margin-top: .8rem; }
 .house-note { color: var(--muted); font-size: .88rem; margin: 0 0 1.2rem; }
 .house-game { margin-bottom: 1rem; }
 .house-game-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }

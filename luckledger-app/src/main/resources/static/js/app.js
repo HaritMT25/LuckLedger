@@ -21,6 +21,7 @@ const state = {
     player: null,            // PlayerDto
     pendingTicket: null,     // { ticketId, mechanic } awaiting scratch
     lastShop: null,          // dealerId of the shop last browsed (for "Buy another")
+    master: null,            // { username } when the operator session is live
 };
 
 const view = document.getElementById('view');
@@ -737,18 +738,28 @@ function txnTable(txns) {
 
 // ---- the house -------------------------------------------------------------
 
-/** The operator's dashboard, deliberately public: pool economics fixed before the first sale. */
+/** The operator's dashboard. Requires the master login; players never see this side of the table. */
 async function renderHouse() {
     view.innerHTML = `<div class="section-title"><h2>🏛️ The House</h2>
-        <span class="hint">The operator's side of the table — public here, hidden everywhere else.</span></div>
+        <span class="hint" id="house-hint">The operator's side of the table.</span></div>
         <div id="house-body">${skeletonCards(3)}</div>`;
     try {
-        const o = await Api.house();
+        if (!state.master) {
+            const me = await Api.me().catch(() => null);
+            if (me && me.authenticated) state.master = { username: me.username };
+        }
+        if (!state.master) return renderMasterLogin();
+
+        const [o, players] = await Promise.all([Api.house(), Api.masterPlayers().catch(() => null)]);
         const body = document.getElementById('house-body');
         if (!body) return; // navigated away
         const t = o.totals;
         const profit = Number(t.houseProfit);
         body.innerHTML = `
+            <div class="master-bar">
+                <span class="player-chip">🏛️ Signed in as <strong>${escapeHtml(state.master.username)}</strong></span>
+                <button class="btn secondary" id="logout-btn">Log out</button>
+            </div>
             <div class="stats">
                 ${stat('Players', t.players)}
                 ${stat('Tickets sold', t.ticketsSold)}
@@ -759,11 +770,122 @@ async function renderHouse() {
             </div>
             <p class="house-note">Every number below was fixed at generation time — before the first
                 ticket was sold, the house knew exactly how much each game would keep.</p>
-            ${o.games.map(houseGamePanel).join('')}`;
+            ${o.games.map(houseGamePanel).join('')}
+            ${players ? playersPanel(players) : ''}`;
+
+        document.getElementById('logout-btn').onclick = async () => {
+            try { await Api.logout(); } catch (e) { /* session may already be gone */ }
+            state.master = null;
+            toast('Logged out of the master account.');
+            renderHouse();
+        };
+        body.querySelectorAll('button[data-restock]').forEach((btn) => {
+            btn.onclick = async () => {
+                btn.disabled = true;
+                btn.textContent = 'Generating…';
+                try {
+                    const r = await Api.restock(btn.dataset.restock);
+                    toast(`Restocked: ${r.booksAdded} new books, ${r.ticketsAdded} tickets — verified before sale.`);
+                    renderHouse();
+                } catch (e) {
+                    btn.disabled = false;
+                    btn.textContent = 'Restock books';
+                    toast(e.message, true);
+                }
+            };
+        });
+        body.querySelectorAll('button[data-grant]').forEach((btn) => {
+            btn.onclick = async () => {
+                const input = body.querySelector(`input[data-grant-for="${btn.dataset.grant}"]`);
+                const amount = Number(input && input.value);
+                if (!amount || amount <= 0) { toast('Enter a positive amount to grant.', true); return; }
+                try {
+                    await Api.grant(btn.dataset.grant, amount);
+                    toast(`Granted ${money(amount)} coins (recorded as a bank loan).`);
+                    if (state.player && state.player.playerId === btn.dataset.grant) await refreshPlayer();
+                    renderHouse();
+                } catch (e) { toast(e.message, true); }
+            };
+        });
     } catch (e) {
+        if (e.status === 401 || e.status === 403) { state.master = null; return renderMasterLogin(); }
         const body = document.getElementById('house-body');
         if (body) body.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
     }
+}
+
+/** The gate in front of the house: one operator account, session login. */
+function renderMasterLogin() {
+    const body = document.getElementById('house-body');
+    if (!body) return;
+    const hint = document.getElementById('house-hint');
+    if (hint) hint.textContent = 'Master login required — players never see this side of the table.';
+    body.innerHTML = `
+        <div class="login-card card">
+            <h3>Master login</h3>
+            <p class="book-sub">The operator's books: every pool's economics, every player, restocking.</p>
+            <form id="login-form" autocomplete="off">
+                <label class="login-label">Username
+                    <input class="login-input" name="username" value="master" required></label>
+                <label class="login-label">Password
+                    <input class="login-input" name="password" type="password" required
+                        placeholder="default: scratch-the-truth"></label>
+                <p class="login-error" id="login-error" hidden></p>
+                <button class="btn block" type="submit">Open the books</button>
+            </form>
+        </div>`;
+    document.getElementById('login-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const err = document.getElementById('login-error');
+        err.hidden = true;
+        form.querySelector('button').disabled = true;
+        try {
+            const session = await Api.login(form.username.value.trim(), form.password.value);
+            state.master = { username: session.username };
+            toast('Master session opened.');
+            renderHouse();
+        } catch (ex) {
+            form.querySelector('button').disabled = false;
+            err.textContent = ex.code === 'BAD_CREDENTIALS' ? 'Wrong username or password.' : ex.message;
+            err.hidden = false;
+        }
+    };
+}
+
+/** Master-only: every player's bankroll, activity, and a coin-grant control. */
+function playersPanel(players) {
+    if (!players.length) {
+        return `<div class="chart-panel"><h3>Players</h3><p class="empty">No players yet.</p></div>`;
+    }
+    return `<div class="chart-panel">
+        <h3>Players</h3>
+        <p class="chart-sub">Each row is one anonymous browser session. Grants are recorded as bank
+            loans — the ledger stays append-only.</p>
+        <div class="table-scroll"><table>
+            <thead><tr><th>Player</th><th>Balance</th><th>Borrowed</th><th>Spent</th><th>Won</th>
+                <th>Net</th><th>Unscratched</th><th>Grant coins</th></tr></thead>
+            <tbody>
+                ${players.map((p) => {
+                    const net = Number(p.netPosition);
+                    return `<tr>
+                        <td title="${p.playerId}">${escapeHtml(p.displayName)}</td>
+                        <td>${money(p.coinBalance)}</td>
+                        <td>${money(p.totalBorrowed)}</td>
+                        <td>${money(p.totalSpent)}</td>
+                        <td>${money(p.totalWon)}</td>
+                        <td class="${net >= 0 ? 'net-good' : 'net-bad'}">${(net >= 0 ? '+' : '') + money(net)}</td>
+                        <td>${p.pendingTickets}</td>
+                        <td class="grant-cell">
+                            <input class="grant-input" type="number" min="1" step="1" placeholder="100"
+                                data-grant-for="${p.playerId}">
+                            <button class="btn secondary" data-grant="${p.playerId}">Grant</button>
+                        </td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table></div>
+    </div>`;
 }
 
 function houseGamePanel(g) {
@@ -802,6 +924,7 @@ function houseGamePanel(g) {
             <span>Engineered near-miss rate <b>${Math.round(Number(g.nearMissRate) * 100)}%</b> of losers</span>
             <span>Generated in <b>${g.generationTimeMs}ms</b></span>
         </div>
+        <button class="btn secondary restock-btn" data-restock="${g.gameId}">Restock books</button>
     </div>`;
 }
 

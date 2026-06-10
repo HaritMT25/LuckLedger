@@ -1,5 +1,8 @@
 package com.luckledger.api;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestBuilders.formLogin;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -55,6 +58,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         PlayerController.class,
         LedgerController.class,
         HouseController.class,
+        SecurityConfig.class,
+        AuthController.class,
+        MasterController.class,
+        RestockService.class,
         GlobalExceptionHandler.class
 })
 @AutoConfigureMockMvc
@@ -147,7 +154,7 @@ class ApiEndpointsIntegrationTest {
     @Test
     void houseOverviewExposesPoolEconomics() throws Exception {
         // Before any sale the pool's economics are already fixed: the prize fund is known in full.
-        mockMvc.perform(get("/api/house/overview"))
+        mockMvc.perform(get("/api/house/overview").with(user("master").roles("MASTER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totals.ticketsSold").value(0))
                 .andExpect(jsonPath("$.totals.revenue").value(0))
@@ -170,11 +177,76 @@ class ApiEndpointsIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/house/overview"))
+        mockMvc.perform(get("/api/house/overview").with(user("master").roles("MASTER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totals.ticketsSold").value(1))
                 .andExpect(jsonPath("$.totals.ticketsRevealed").value(1))
                 .andExpect(jsonPath("$.totals.revenue").value(5));
+    }
+
+    // --- auth & master --------------------------------------------------------
+
+    @Test
+    void operatorSurfaceRequiresMasterLogin() throws Exception {
+        mockMvc.perform(get("/api/house/overview"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        mockMvc.perform(get("/api/master/players"))
+                .andExpect(status().isUnauthorized());
+        // Player-facing surface stays public.
+        mockMvc.perform(get("/api/dealers")).andExpect(status().isOk());
+    }
+
+    @Test
+    void masterCanLogInAndOut() throws Exception {
+        mockMvc.perform(formLogin("/api/auth/login").user("master").password("scratch-the-truth"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("master"));
+
+        mockMvc.perform(formLogin("/api/auth/login").user("master").password("wrong"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("BAD_CREDENTIALS"));
+
+        mockMvc.perform(get("/api/auth/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authenticated").value(false));
+        mockMvc.perform(get("/api/auth/me").with(user("master").roles("MASTER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authenticated").value(true))
+                .andExpect(jsonPath("$.username").value("master"));
+    }
+
+    @Test
+    void masterSeesPlayersAndGrantsCoins() throws Exception {
+        UUID playerId = fundedPlayer();
+        mockMvc.perform(get("/api/master/players").with(user("master").roles("MASTER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].playerId").value(playerId.toString()))
+                .andExpect(jsonPath("$[0].coinBalance").value(100))
+                .andExpect(jsonPath("$[0].pendingTickets").value(0));
+
+        // A grant lands as an ordinary bank loan: balance up, recorded against totalBorrowed.
+        mockMvc.perform(post("/api/master/players/" + playerId + "/grant")
+                        .with(user("master").roles("MASTER")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":50}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.coinBalance").value(150))
+                .andExpect(jsonPath("$.totalBorrowed").value(150));
+    }
+
+    @Test
+    void masterRestocksAGameThroughTheVerifiedPipeline() throws Exception {
+        mockMvc.perform(post("/api/master/games/" + gameId + "/restock")
+                        .with(user("master").roles("MASTER")).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.booksAdded").value(20))
+                .andExpect(jsonPath("$.ticketsAdded").value(500));
+
+        // The game's pool doubled and the new books are allocated to the stocking shops.
+        mockMvc.perform(get("/api/house/overview").with(user("master").roles("MASTER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.games[0].totalTickets").value(1000))
+                .andExpect(jsonPath("$.games[0].books.total").value(40));
     }
 
     @Test

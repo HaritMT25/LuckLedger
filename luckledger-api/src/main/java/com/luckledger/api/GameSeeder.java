@@ -87,17 +87,23 @@ public class GameSeeder implements ApplicationRunner {
         seed(ApiConfig.demonConfig(), demonOrchestrator, demonId, stockedBy(roster, demonId));
     }
 
-    private void seed(GameConfig config, GameOrchestrator orchestrator, UUID gameId, List<DealerEntity> stockingShops) {
-        // Allocate this game's books across the shops that stock it; a domain Dealer carries the shop's
-        // stable id so each book's dealerId points back at the persisted shop.
-        List<Dealer> dealerSlots = new ArrayList<>(stockingShops.size());
-        for (DealerEntity shop : stockingShops) {
-            dealerSlots.add(new Dealer(
+    /**
+     * Maps persisted shops to domain {@link Dealer} allocation slots. The Dealer carries the shop's
+     * stable id so each allocated book's dealerId points back at the persisted shop. Shared with
+     * {@link RestockService}, which runs the same allocation on later cycles.
+     */
+    static List<Dealer> dealerSlots(List<DealerEntity> shops) {
+        List<Dealer> slots = new ArrayList<>(shops.size());
+        for (DealerEntity shop : shops) {
+            slots.add(new Dealer(
                     shop.getId(), shop.getShopName(), DealerTier.TIER_1, shop.getRankScore(),
                     shop.getBooksPerCycle(), shop.getBooksDepleted()));
         }
+        return slots;
+    }
 
-        GameSetupResult setup = orchestrator.setup(config, dealerSlots);
+    private void seed(GameConfig config, GameOrchestrator orchestrator, UUID gameId, List<DealerEntity> stockingShops) {
+        GameSetupResult setup = orchestrator.setup(config, dealerSlots(stockingShops));
         PersistedGame persisted = GamePersistenceMapper.toPersisted(gameId, config, setup, Instant.now());
         games.save(persisted.game());
         books.saveAll(persisted.books());

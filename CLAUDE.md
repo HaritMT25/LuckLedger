@@ -2,7 +2,8 @@
 
 ## Project
 Free-to-play scratch card simulator. Java 21 + Spring Boot 3.5.x + Maven.
-Education-first. No monetization. No auth (yet).
+Education-first. No monetization. Auth: one master (operator) account via Spring Security
+sessions, gating /api/house/** + /api/master/**; players stay anonymous.
 
 ## Tech
 - Java 21, Spring Boot 3.5.x, Maven 3.9+

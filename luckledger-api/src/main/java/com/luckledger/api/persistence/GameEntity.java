@@ -85,6 +85,12 @@ public class GameEntity {
         this.createdAt = createdAt;
     }
 
+    /** Folds a restock cycle's new batch into the running totals; nothing else changes. */
+    public void recordRestock(int ticketsAdded, int booksAdded) {
+        this.totalTickets += ticketsAdded;
+        this.bookCount += booksAdded;
+    }
+
     public UUID getId() { return id; }
     public MechanicType getMechanicType() { return mechanicType; }
     public String getThemeId() { return themeId; }

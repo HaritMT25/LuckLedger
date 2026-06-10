@@ -40,6 +40,21 @@ public interface TicketRepository extends JpaRepository<TicketEntity, UUID> {
             """)
     List<GameTicketStats> aggregateByGame();
 
+    /** Bought-but-unscratched ticket counts per player, for the master's player oversight. */
+    @Query("""
+            select t.playerId as playerId, count(t) as pending
+            from TicketEntity t
+            where t.playerId is not null and t.revealed = false
+            group by t.playerId
+            """)
+    List<PendingByPlayer> countPendingByPlayer();
+
+    /** Projection for {@link #countPendingByPlayer()}. */
+    interface PendingByPlayer {
+        UUID getPlayerId();
+        long getPending();
+    }
+
     /** Projection for {@link #aggregateByGame()}. */
     interface GameTicketStats {
         UUID getGameId();
