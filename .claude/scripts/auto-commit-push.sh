@@ -2,8 +2,9 @@
 # Stop hook: run tests → if pass → commit → push. If fail → exit 2 (agent keeps going).
 #
 # The suite uses Testcontainers, which require a running Docker daemon. When Docker is
-# unavailable the tests cannot run — that is an environment condition, not a code defect,
-# so we SKIP the test gate (with a notice) instead of blocking the agent forever.
+# unavailable the tests cannot run — the gate FAILS CLOSED: nothing is committed or
+# pushed on an unverified tree. Export LUCKLEDGER_ALLOW_UNTESTED_COMMIT=1 for an
+# explicit one-time override (commits with a warning, no test run).
 # When Docker IS up, the full suite runs and still gates commit/push as before.
 
 cd "$(git rev-parse --show-toplevel)" 2>/dev/null || exit 0
@@ -11,9 +12,16 @@ cd "$(git rev-parse --show-toplevel)" 2>/dev/null || exit 0
 # Skip if no Java modules exist yet
 ls luckledger-*/pom.xml >/dev/null 2>&1 || exit 0
 
-# Testcontainers needs Docker. If the daemon is down, skip the gate rather than fail on infra.
+# Testcontainers needs Docker. If the daemon is down, block commit/push (fail-closed):
+# an unverified tree must not reach the remote. LUCKLEDGER_ALLOW_UNTESTED_COMMIT=1 overrides.
 if ! docker info >/dev/null 2>&1; then
-  echo "Docker daemon unavailable — skipping Testcontainers test run. Start Docker to re-enable the test gate." >&2
+  if [ "${LUCKLEDGER_ALLOW_UNTESTED_COMMIT:-}" = "1" ]; then
+    echo "Docker daemon unavailable — LUCKLEDGER_ALLOW_UNTESTED_COMMIT=1 override set; committing WITHOUT the test gate." >&2
+  else
+    echo "Docker daemon unavailable — tests cannot run, so commit/push is BLOCKED (fail-closed)." >&2
+    echo "Start Docker to re-enable the gate, or export LUCKLEDGER_ALLOW_UNTESTED_COMMIT=1 to override once." >&2
+    exit 2
+  fi
 else
   # Run tests
   mvn -q test -fae 2>&1 | tail -30

@@ -21,3 +21,6 @@ target/
 .dolt/
 *.db
 .beads-credential-key
+
+# Nested Claude Code agent worktrees — never commit their gitlinks onto a real branch
+.claude/worktrees/
