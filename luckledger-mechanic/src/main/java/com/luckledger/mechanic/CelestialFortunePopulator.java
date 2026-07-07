@@ -4,6 +4,7 @@ import com.luckledger.domain.mechanic.Cell;
 import com.luckledger.domain.mechanic.Grid;
 import com.luckledger.domain.mechanic.GridPopulator;
 import com.luckledger.domain.mechanic.GridSize;
+import com.luckledger.domain.mechanic.LoserLayout;
 import com.luckledger.domain.mechanic.Position;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -35,10 +36,14 @@ import java.util.Set;
  *   <li>fill the inert decoy row from numbers used nowhere else.</li>
  * </ul>
  *
- * <p>A loser ({@code $0}) is built with {@code k = 0}: all player numbers come from the complement,
- * giving zero overlap and therefore no accidental win. The resulting layout follows the contract
- * shared with {@link CelestialFortuneEvaluator} (winning row, two player rows, decoy row), so every
- * grid this produces round-trips through that evaluator to the prize it was built for.
+ * <p>A loser ({@code $0}) is built with {@code k = 0} by default ({@link LoserLayout#CLEAN}): all
+ * player numbers come from the complement, giving zero overlap and therefore no accidental win. For
+ * {@link LoserLayout#NEAR_MISS} a loser is instead built with {@code k = 1} — exactly one player
+ * number is drawn from the winning set. That is one short of the {@code $2}/two-match floor, so the
+ * grid still evaluates to {@code $0} (one distinct match pays nothing) yet reads as "you almost won":
+ * the RTP-neutral near-miss this simulator exists to expose. The resulting layout follows the
+ * contract shared with {@link CelestialFortuneEvaluator} (winning row, two player rows, decoy row),
+ * so every grid this produces round-trips through that evaluator to the prize it was built for.
  *
  * <p>Randomness is supplied through a {@link GridUtils} (composition, not inheritance): production
  * wires a {@link java.security.SecureRandom}; tests inject a seeded source for reproducible layouts.
@@ -46,6 +51,13 @@ import java.util.Set;
  * hold the matches — are uniformly shuffled rather than pinned to fixed positions.
  */
 public final class CelestialFortunePopulator implements GridPopulator {
+
+    /**
+     * Overlap count for an engineered near-miss loser: exactly one player number hits the winning
+     * set. The win floor is two matches (see {@code NearMissAnalyzer}), so a single match is one
+     * short — close enough to feel like a win, but still {@code $0}.
+     */
+    static final int NEAR_MISS_OVERLAP = 1;
 
     private final GridUtils gridUtils;
 
@@ -80,8 +92,36 @@ public final class CelestialFortunePopulator implements GridPopulator {
      */
     @Override
     public Grid populate(GridSize size, double prizeAmount, List<String> symbolPool) {
+        return populate(size, prizeAmount, symbolPool, LoserLayout.CLEAN);
+    }
+
+    /**
+     * Builds a Celestial Fortune grid, additionally choosing how a losing ({@code $0}) grid is shaped.
+     *
+     * <p>Identical to {@link #populate(GridSize, double, List)} for winners. For a {@code $0} loser,
+     * {@link LoserLayout#CLEAN} yields zero overlap (no matches) while {@link LoserLayout#NEAR_MISS}
+     * yields exactly {@value #NEAR_MISS_OVERLAP} overlapping number — an engineered near-miss that
+     * still evaluates to {@code $0}. This is a single constructive pass; the populator is handed the
+     * target overlap and builds it, never evaluate-and-retry.
+     *
+     * @param size       must be {@link CelestialFortuneEvaluator#GRID_SIZE} ({@link GridSize#FOUR})
+     * @param prizeAmount the predetermined prize; one of the calibrated ladder values
+     * @param symbolPool the numbers to draw from; at least
+     *                   {@value CelestialFortuneEvaluator#NUMBER_POOL_SIZE} distinct symbols
+     * @param layout     how to shape a losing grid; ignored when {@code prizeAmount} is a winner
+     * @return a fully populated {@link GridSize#FOUR} grid evaluating to {@code prizeAmount}
+     * @throws NullPointerException     if {@code size}, {@code symbolPool}, or {@code layout} is
+     *                                  {@code null}
+     * @throws IllegalArgumentException if {@code size} is not {@code FOUR}, {@code prizeAmount} is not
+     *                                  a ladder value, or {@code symbolPool} lacks enough distinct
+     *                                  numbers
+     */
+    @Override
+    public Grid populate(
+            GridSize size, double prizeAmount, List<String> symbolPool, LoserLayout layout) {
         Objects.requireNonNull(size, "size must not be null");
         Objects.requireNonNull(symbolPool, "symbolPool must not be null");
+        Objects.requireNonNull(layout, "layout must not be null");
         if (size != CelestialFortuneEvaluator.GRID_SIZE) {
             throw new IllegalArgumentException(
                     "Celestial Fortune requires a " + CelestialFortuneEvaluator.GRID_SIZE
@@ -93,7 +133,7 @@ public final class CelestialFortunePopulator implements GridPopulator {
                             + " distinct numbers, pool had " + distinctCount(symbolPool));
         }
 
-        int overlap = overlapForPrize(prizeAmount);
+        int overlap = overlapForPrize(prizeAmount, layout);
 
         List<String> winning =
                 gridUtils.getRandomSymbols(
@@ -148,12 +188,18 @@ public final class CelestialFortunePopulator implements GridPopulator {
     }
 
     /**
-     * Maps a prize back to the overlap count {@code k} that produces it under the calibrated ladder,
-     * choosing the smallest {@code k} for the ambiguous {@code $0} tier (0 or 1 match) so that a
-     * loser carries zero overlap and cannot accidentally win.
+     * Maps a prize back to the overlap count {@code k} that produces it under the calibrated ladder.
+     *
+     * <p>The {@code $0} tier is ambiguous — both 0 and 1 matches pay nothing — so {@code layout}
+     * disambiguates it: {@link LoserLayout#CLEAN} picks {@code k = 0} (an obvious miss), while
+     * {@link LoserLayout#NEAR_MISS} picks {@code k = }{@value #NEAR_MISS_OVERLAP} (one short of the
+     * two-match win floor). Winning prizes map to their unique {@code k} and ignore {@code layout}.
      */
-    private static int overlapForPrize(double prizeAmount) {
+    private static int overlapForPrize(double prizeAmount, LoserLayout layout) {
         BigDecimal prize = BigDecimal.valueOf(prizeAmount);
+        if (prize.signum() == 0) {
+            return layout == LoserLayout.NEAR_MISS ? NEAR_MISS_OVERLAP : 0;
+        }
         for (int k = 0; k <= CelestialFortuneEvaluator.WINNING_NUMBER_COUNT; k++) {
             if (CelestialFortuneEvaluator.prizeForMatches(k).compareTo(prize) == 0) {
                 return k;
