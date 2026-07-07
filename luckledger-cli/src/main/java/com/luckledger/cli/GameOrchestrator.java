@@ -93,8 +93,8 @@ public final class GameOrchestrator {
 
     private GameSetupResult runCycle(GameConfig config, List<Dealer> dealers) {
         ThemeRef theme = themeSkinningService.getTheme(config.themeId());
-        GenerationResult generation =
-                generationPipeline.generate(config.poolContract(), config.mechanicType(), theme);
+        GenerationResult generation = generationPipeline.generate(
+                config.poolContract(), config.mechanicType(), theme, config.nearMissMode());
 
         UUID poolContractId = UUID.randomUUID(); // PoolContract carries no id; mint one per cycle
         PartitionResult partition =
