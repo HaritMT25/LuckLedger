@@ -3,6 +3,11 @@ package com.luckledger.api;
 import com.luckledger.api.persistence.PlayerRepository;
 import com.luckledger.api.persistence.TicketRepository;
 import com.luckledger.domain.player.Player;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -69,11 +74,11 @@ public class MasterController {
 
     /**
      * Grants a player coins. Implemented as a bank loan so the move is visible in the player's own
-     * ledger like any other coin movement — the ledger stays append-only and complete.
+     * ledger like any other coin movement — the ledger stays append-only and complete. The amount is
+     * validated at the boundary ({@code @Valid}: positive, bounded, at most 4 decimal places).
      */
-    /** Amount validation lives in the domain ({@code BankService} rejects non-positive → 422). */
     @PostMapping("/players/{playerId}/grant")
-    public PlayerController.PlayerDto grant(@PathVariable UUID playerId, @RequestBody GrantRequest request) {
+    public PlayerController.PlayerDto grant(@PathVariable UUID playerId, @Valid @RequestBody GrantRequest request) {
         Player player = playerRegistry.borrow(playerId, request.amount());
         return new PlayerController.PlayerDto(
                 player.getPlayerId(), player.getDisplayName(), player.getCoinBalance(),
@@ -87,7 +92,8 @@ public class MasterController {
         return restockService.restock(gameId);
     }
 
-    public record GrantRequest(BigDecimal amount) {}
+    public record GrantRequest(
+            @NotNull @Positive @Digits(integer = 9, fraction = 4) @DecimalMax("1000000") BigDecimal amount) {}
 
     public record PlayerAdminView(UUID playerId, String displayName, BigDecimal coinBalance,
             BigDecimal totalBorrowed, BigDecimal totalSpent, BigDecimal totalWon, BigDecimal netPosition,
