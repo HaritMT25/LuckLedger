@@ -1,16 +1,28 @@
 package com.luckledger.api.persistence;
 
+import jakarta.persistence.LockModeType;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /** Spring Data repository for persisted tickets. */
 public interface TicketRepository extends JpaRepository<TicketEntity, UUID> {
 
     List<TicketEntity> findByBookIdOrderByPositionInBookAsc(UUID bookId);
+
+    /**
+     * Loads a ticket under a pessimistic write lock so a reveal's check-then-act on the reveal flags
+     * is atomic — two threads racing to scratch the same ticket cannot both pass the "not yet
+     * revealed" gate. The ticket is locked before the player, per the writer lock-order rule.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select t from TicketEntity t where t.id = :id")
+    Optional<TicketEntity> findByIdForUpdate(@Param("id") UUID id);
 
     List<TicketEntity> findByGameId(UUID gameId);
 

@@ -1,6 +1,13 @@
 package com.luckledger.api;
 
 import com.luckledger.domain.player.Player;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -25,7 +32,7 @@ public class PlayerController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public PlayerDto create(@RequestBody CreatePlayerRequest request) {
+    public PlayerDto create(@Valid @RequestBody CreatePlayerRequest request) {
         return dto(players.create(request.displayName()));
     }
 
@@ -35,7 +42,7 @@ public class PlayerController {
     }
 
     @PostMapping("/{playerId}/borrow")
-    public PlayerDto borrow(@PathVariable UUID playerId, @RequestBody BorrowRequest request) {
+    public PlayerDto borrow(@PathVariable UUID playerId, @Valid @RequestBody BorrowRequest request) {
         return dto(players.borrow(playerId, request.amount()));
     }
 
@@ -50,9 +57,10 @@ public class PlayerController {
                 p.getNetPosition());
     }
 
-    public record CreatePlayerRequest(String displayName) {}
+    public record CreatePlayerRequest(@NotBlank @Size(max = 120) String displayName) {}
 
-    public record BorrowRequest(BigDecimal amount) {}
+    public record BorrowRequest(
+            @NotNull @Positive @Digits(integer = 9, fraction = 4) @DecimalMax("1000000") BigDecimal amount) {}
 
     public record PlayerDto(
             UUID playerId,

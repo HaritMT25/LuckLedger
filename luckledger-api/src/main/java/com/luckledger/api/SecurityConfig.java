@@ -5,7 +5,11 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,8 +35,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 /**
  * Auth for the operator surface. There is exactly one account — the master — held in memory with a
  * BCrypt-hashed password from {@link MasterAccountProperties}; players remain anonymous (their id in
- * localStorage), as before. Deny-by-default applies to the operator routes: {@code /api/house/**}
- * and {@code /api/master/**} require {@code ROLE_MASTER}; every other endpoint stays public.
+ * localStorage), as before. Only the mutating operator routes are gated: {@code /api/master/**}
+ * requires {@code ROLE_MASTER}. The read-only {@code /api/house/**} overview is deliberately public —
+ * surfacing that every pool is built to keep a fixed share IS the lesson — as is every other endpoint.
  *
  * <p>Login is session-based ({@code POST /api/auth/login}, form fields, JSON responses — no redirect
  * dance for the SPA). CSRF protection follows the documented SPA cookie-to-header pattern
@@ -46,6 +51,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @EnableConfigurationProperties(MasterAccountProperties.class)
 public class SecurityConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12);
@@ -53,17 +60,36 @@ public class SecurityConfig {
 
     @Bean
     public UserDetailsService masterAccount(MasterAccountProperties props, PasswordEncoder encoder) {
+        String password = resolvePassword(props);
         return new InMemoryUserDetailsManager(User.withUsername(props.username())
-                .password(encoder.encode(props.password()))
+                .password(encoder.encode(password))
                 .roles("MASTER")
                 .build());
+    }
+
+    /**
+     * Fails closed: if no master password is configured, mint a random one-time password and surface
+     * it once at WARN so the demo can still boot without a guessable committed default. Only the
+     * BCrypt hash is retained; the plaintext lives no longer than this startup log line.
+     */
+    private static String resolvePassword(MasterAccountProperties props) {
+        if (props.hasConfiguredPassword()) {
+            return props.password();
+        }
+        byte[] bytes = new byte[24];
+        new SecureRandom().nextBytes(bytes);
+        String generated = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        log.warn("No master password configured (luckledger.master.password). Generated a one-time "
+                + "password for user '{}': {}  — set LUCKLEDGER_MASTER_PASSWORD to pin your own.",
+                props.username(), generated);
+        return generated;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/house/**", "/api/master/**").hasRole("MASTER")
+                        .requestMatchers("/api/master/**").hasRole("MASTER")
                         .anyRequest().permitAll())
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())

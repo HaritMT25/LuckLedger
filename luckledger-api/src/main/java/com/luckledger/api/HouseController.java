@@ -18,11 +18,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The operator's ("house") side of the table, deliberately public: per-game pool economics —
- * predetermined prize fund vs maximum revenue, tickets sold, books active/depleted — and the global
- * revenue/payout totals. A real lottery operator guards these numbers; an awareness simulator
- * surfaces them, because seeing that every pool is built to keep a fixed share IS the lesson.
- * Read-only; there is no admin mutation surface (and no auth in the project yet).
+ * The operator's ("house") side of the table, <strong>deliberately public</strong> (no login
+ * required — see {@link SecurityConfig}): per-game pool economics — predetermined prize fund vs
+ * maximum revenue, tickets sold, books active/depleted — and the global revenue/payout totals. A real
+ * lottery operator guards these numbers; an awareness simulator surfaces them, because seeing that
+ * every pool is built to keep a fixed share IS the lesson. Read-only; there is no admin mutation
+ * surface here — the gated master actions (grant, restock) live behind {@code /api/master/**}.
  */
 @RestController
 @RequestMapping("/api/house")

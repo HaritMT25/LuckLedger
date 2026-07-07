@@ -6,6 +6,7 @@ import com.luckledger.api.persistence.PlayerRepository;
 import com.luckledger.domain.player.Player;
 import com.luckledger.player.bank.BankService;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -53,9 +54,13 @@ public class PlayerRegistry {
      */
     @Transactional
     public Player borrow(UUID playerId, BigDecimal amount) {
+        Objects.requireNonNull(amount, "amount must not be null");
+        // Coins carry 4 decimal places everywhere; normalize the request to that scale before it hits
+        // the domain so a client sending e.g. 100.00000 cannot smuggle in extra precision.
+        BigDecimal normalized = amount.setScale(4, RoundingMode.HALF_UP);
         PlayerEntity entity = load(playerId);
         Player player = PlayerMapper.toDomain(entity);
-        bankService.borrow(player, amount); // mutates player + appends BORROW to the ledger
+        bankService.borrow(player, normalized); // mutates player + appends BORROW to the ledger
         PlayerMapper.applyTo(player, entity);
         players.save(entity);
         return player;

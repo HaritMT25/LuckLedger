@@ -5,6 +5,8 @@ import com.luckledger.api.persistence.TicketEntity;
 import com.luckledger.api.persistence.TicketRepository;
 import com.luckledger.api.RevealGateway.RevealOutcome;
 import com.luckledger.domain.scratch.PurchaseResult;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -43,7 +45,7 @@ public class TicketController {
     }
 
     @PostMapping("/api/books/{bookId}/purchase")
-    public PurchaseResult purchase(@PathVariable UUID bookId, @RequestBody PlayerRequest request) {
+    public PurchaseResult purchase(@PathVariable UUID bookId, @Valid @RequestBody PlayerRequest request) {
         return purchaseGateway.purchase(bookId, request.playerId());
     }
 
@@ -54,7 +56,7 @@ public class TicketController {
     }
 
     @PostMapping("/api/tickets/{ticketId}/reveal")
-    public TicketView reveal(@PathVariable UUID ticketId, @RequestBody PlayerRequest request) {
+    public TicketView reveal(@PathVariable UUID ticketId, @Valid @RequestBody PlayerRequest request) {
         RevealOutcome outcome = revealGateway.reveal(ticketId, request.playerId());
         return TicketView.revealed(outcome);
     }
@@ -73,7 +75,7 @@ public class TicketController {
                 .toList();
     }
 
-    public record PlayerRequest(UUID playerId) {}
+    public record PlayerRequest(@NotNull UUID playerId) {}
 
     /** A bought ticket awaiting its scratch — enough to resume the scratch flow. */
     public record PendingTicket(UUID ticketId, String mechanic, UUID gameId, String gameName, UUID bookId) {}

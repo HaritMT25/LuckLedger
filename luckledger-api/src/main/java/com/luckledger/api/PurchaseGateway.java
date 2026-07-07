@@ -35,6 +35,12 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>The debit runs first (via the pure {@link Player#debit}, which throws if unaffordable) so an
  * unaffordable purchase changes nothing. The ticket is not revealed here — that is the
  * {@link RevealGateway}'s job.
+ *
+ * <p><strong>Lock order (writer rule): book/ticket first, player LAST.</strong> The book row is taken
+ * under a pessimistic write lock at the very start, so the depleted-book check and the sale-cursor
+ * advance run serialized — two concurrent buyers of the same book are ordered, never handed the same
+ * slot. The player row is locked last. Every writer (purchase, reveal, borrow) obtains locks in this
+ * same order to make deadlock impossible.
  */
 @Service
 public class PurchaseGateway {
@@ -68,7 +74,9 @@ public class PurchaseGateway {
         Objects.requireNonNull(bookId, "bookId");
         Objects.requireNonNull(playerId, "playerId");
 
-        TicketBookEntity book = books.findById(bookId)
+        // Lock the book FIRST: the depleted check and cursor advance must be serialized so two
+        // concurrent buyers cannot draw the same slot.
+        TicketBookEntity book = books.findByIdForUpdate(bookId)
                 .orElseThrow(() -> new NoSuchElementException("no book with id " + bookId));
         UUID dealerId = book.getDealerId();
         if (dealerId == null) {
@@ -82,8 +90,9 @@ public class PurchaseGateway {
                 .orElseThrow(() -> new NoSuchElementException("no game with id " + book.getGameId()));
         BigDecimal price = game.getTicketPrice();
 
-        // Debit first: throws InsufficientBalanceException before a ticket is drawn.
-        PlayerEntity playerEntity = players.findById(playerId)
+        // Debit first: throws InsufficientBalanceException before a ticket is drawn. The player row is
+        // locked LAST (after the book), per the writer lock-order rule.
+        PlayerEntity playerEntity = players.findByIdForUpdate(playerId)
                 .orElseThrow(() -> new NoSuchElementException("no player with id " + playerId));
         Player player = PlayerMapper.toDomain(playerEntity);
         player.debit(price);

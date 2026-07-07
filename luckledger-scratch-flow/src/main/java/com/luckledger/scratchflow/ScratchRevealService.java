@@ -23,8 +23,10 @@ import java.util.UUID;
  * subsequent reveals (or {@link #getRevealedResult}) return the cached result without crediting or
  * recording again. This keeps the ledger append-only and prevents double payouts.
  *
- * <p>Not thread-safe: a single player's flow is sequential. The {@code WIN} transaction carries no
- * dealer/book id because the reveal operates on a ticket alone (those fields are nullable).
+ * <p>Not thread-safe: a single player's flow is sequential. The {@code WIN} transaction can carry the
+ * originating dealer/book id (via the {@link #reveal(Player, TicketCard, UUID, UUID)} overload) so the
+ * ledger can attribute winnings back to a shop; the plain two-arg {@link #reveal(Player, TicketCard)}
+ * keeps them null for callers that reveal a ticket in isolation.
  */
 public final class ScratchRevealService {
 
@@ -40,12 +42,28 @@ public final class ScratchRevealService {
 
     /**
      * Reveals a ticket, crediting the player and recording a WIN if it wins. Idempotent per ticket.
+     * The recorded {@code WIN} carries no dealer/book id — see the four-arg overload to attribute a
+     * win back to the shop it came from.
      *
      * @param player the ticket's owner; never {@code null}
      * @param ticket the ticket to reveal; never {@code null}
      * @return the reveal outcome (the cached one if already revealed)
      */
     public RevealResult reveal(Player player, TicketCard ticket) {
+        return reveal(player, ticket, null, null);
+    }
+
+    /**
+     * Reveals a ticket, attributing a winning {@code WIN} to the given {@code dealerId} and
+     * {@code bookId} so the ledger can compare returns by shop. Idempotent per ticket.
+     *
+     * @param player the ticket's owner; never {@code null}
+     * @param ticket the ticket to reveal; never {@code null}
+     * @param dealerId the shop the ticket came from, or {@code null} if revealed in isolation
+     * @param bookId the book the ticket came from, or {@code null} if revealed in isolation
+     * @return the reveal outcome (the cached one if already revealed)
+     */
+    public RevealResult reveal(Player player, TicketCard ticket, UUID dealerId, UUID bookId) {
         Objects.requireNonNull(player, "player must not be null");
         Objects.requireNonNull(ticket, "ticket must not be null");
 
@@ -63,8 +81,8 @@ public final class ScratchRevealService {
                     player.getPlayerId(),
                     TransactionType.WIN,
                     evaluation.prizeAmount(),
-                    null,
-                    null,
+                    dealerId,
+                    bookId,
                     ticketId,
                     Instant.now());
             transactionRecorder.record(win);

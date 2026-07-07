@@ -877,28 +877,35 @@ function txnTable(txns) {
 
 // ---- the house -------------------------------------------------------------
 
-/** The operator's dashboard. Requires the master login; players never see this side of the table. */
+/**
+ * The operator's dashboard. The overview (pool economics + totals) is public — surfacing that every
+ * pool is built to keep a fixed share IS the lesson — so it renders for everyone. The master-only
+ * layer (per-player table, coin grants, restocking) appears only for a signed-in operator; anonymous
+ * visitors get a compact "log in" card instead.
+ */
 async function renderHouse() {
     view.innerHTML = `<div class="section-title"><h2>🏛️ The House</h2>
-        <span class="hint" id="house-hint">The operator's side of the table.</span></div>
+        <span class="hint" id="house-hint">The operator's side of the table — every pool's economics, in the open.</span></div>
         <div id="house-body">${skeletonCards(3)}</div>`;
     try {
         if (!state.master) {
             const me = await Api.me().catch(() => null);
             if (me && me.authenticated) state.master = { username: me.username };
         }
-        if (!state.master) return renderMasterLogin();
+        const isMaster = !!state.master;
 
-        const [o, players] = await Promise.all([Api.house(), Api.masterPlayers().catch(() => null)]);
+        // House overview is public; the player roster needs the master session, so only ask for it
+        // when signed in (and tolerate a lapsed session by degrading to the public view).
+        const [o, players] = await Promise.all([
+            Api.house(),
+            isMaster ? Api.masterPlayers().catch(() => null) : Promise.resolve(null),
+        ]);
         const body = document.getElementById('house-body');
         if (!body) return; // navigated away
         const t = o.totals;
         const profit = Number(t.houseProfit);
         body.innerHTML = `
-            <div class="master-bar">
-                <span class="player-chip">🏛️ Signed in as <strong>${escapeHtml(state.master.username)}</strong></span>
-                <button class="btn secondary" id="logout-btn">Log out</button>
-            </div>
+            ${isMaster ? masterBar(state.master.username) : masterToolsCard()}
             <div class="stats">
                 ${stat('Players', t.players)}
                 ${stat('Tickets sold', t.ticketsSold)}
@@ -909,8 +916,14 @@ async function renderHouse() {
             </div>
             <p class="house-note">Every number below was fixed at generation time — before the first
                 ticket was sold, the house knew exactly how much each game would keep.</p>
-            ${o.games.map(houseGamePanel).join('')}
-            ${players ? playersPanel(players) : ''}`;
+            ${o.games.map((g) => houseGamePanel(g, isMaster)).join('')}
+            ${isMaster && players ? playersPanel(players) : ''}`;
+
+        if (!isMaster) {
+            const link = document.getElementById('master-login-link');
+            if (link) link.onclick = (e) => { e.preventDefault(); renderMasterLogin(); };
+            return;
+        }
 
         document.getElementById('logout-btn').onclick = async () => {
             try { await Api.logout(); } catch (e) { /* session may already be gone */ }
@@ -953,7 +966,23 @@ async function renderHouse() {
     }
 }
 
-/** The gate in front of the house: one operator account, session login. */
+/** The signed-in operator's identity chip plus a log-out button. */
+function masterBar(username) {
+    return `<div class="master-bar">
+        <span class="player-chip">🏛️ Signed in as <strong>${escapeHtml(username)}</strong></span>
+        <button class="btn secondary" id="logout-btn">Log out</button>
+    </div>`;
+}
+
+/** Shown to anonymous visitors: the overview is theirs to read, but the operator tools are gated. */
+function masterToolsCard() {
+    return `<div class="master-bar">
+        <span class="player-chip">🔒 Master tools — players, coin grants, and restocking — need an operator login.</span>
+        <a href="#house" class="btn secondary" id="master-login-link">Log in</a>
+    </div>`;
+}
+
+/** The gate in front of the operator tools: one operator account, session login. */
 function renderMasterLogin() {
     const body = document.getElementById('house-body');
     if (!body) return;
@@ -968,7 +997,7 @@ function renderMasterLogin() {
                     <input class="login-input" name="username" value="master" required></label>
                 <label class="login-label">Password
                     <input class="login-input" name="password" type="password" required
-                        placeholder="default: scratch-the-truth"></label>
+                        placeholder="password"></label>
                 <p class="login-error" id="login-error" hidden></p>
                 <button class="btn block" type="submit">Open the books</button>
             </form>
@@ -1027,7 +1056,7 @@ function playersPanel(players) {
     </div>`;
 }
 
-function houseGamePanel(g) {
+function houseGamePanel(g, isMaster) {
     const rtp = Math.round(Number(g.payoutRatio) * 1000) / 10;
     const fundPct = Math.min(100, (Number(g.prizeFund) / Math.max(1, Number(g.maxRevenue))) * 100);
     const soldPct = g.totalTickets ? (g.ticketsSold / g.totalTickets) * 100 : 0;
@@ -1063,7 +1092,7 @@ function houseGamePanel(g) {
             <span>Engineered near-miss rate <b>${Math.round(Number(g.nearMissRate) * 100)}%</b> of losers</span>
             <span>Generated in <b>${g.generationTimeMs}ms</b></span>
         </div>
-        <button class="btn secondary restock-btn" data-restock="${g.gameId}">Restock books</button>
+        ${isMaster ? `<button class="btn secondary restock-btn" data-restock="${g.gameId}">Restock books</button>` : ''}
     </div>`;
 }
 

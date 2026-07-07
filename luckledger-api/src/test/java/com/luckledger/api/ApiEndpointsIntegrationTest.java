@@ -63,6 +63,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         MasterController.class,
         RestockService.class,
         GlobalExceptionHandler.class
+}, properties = {
+        "luckledger.master.username=master",
+        "luckledger.master.password=test-password"
 })
 @AutoConfigureMockMvc
 @Transactional
@@ -154,7 +157,7 @@ class ApiEndpointsIntegrationTest {
     @Test
     void houseOverviewExposesPoolEconomics() throws Exception {
         // Before any sale the pool's economics are already fixed: the prize fund is known in full.
-        mockMvc.perform(get("/api/house/overview").with(user("master").roles("MASTER")))
+        mockMvc.perform(get("/api/house/overview"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totals.ticketsSold").value(0))
                 .andExpect(jsonPath("$.totals.revenue").value(0))
@@ -177,7 +180,7 @@ class ApiEndpointsIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/house/overview").with(user("master").roles("MASTER")))
+        mockMvc.perform(get("/api/house/overview"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totals.ticketsSold").value(1))
                 .andExpect(jsonPath("$.totals.ticketsRevealed").value(1))
@@ -187,19 +190,23 @@ class ApiEndpointsIntegrationTest {
     // --- auth & master --------------------------------------------------------
 
     @Test
-    void operatorSurfaceRequiresMasterLogin() throws Exception {
+    void houseIsPublicButMasterToolsRequireLogin() throws Exception {
+        // The house overview is deliberately public — anyone can read the pool economics.
         mockMvc.perform(get("/api/house/overview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.ticketsSold").value(0))
+                .andExpect(jsonPath("$.games[0].gameName").value("Demon Seal"));
+        // The master tools stay gated: anonymous access is refused.
+        mockMvc.perform(get("/api/master/players"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
-        mockMvc.perform(get("/api/master/players"))
-                .andExpect(status().isUnauthorized());
         // Player-facing surface stays public.
         mockMvc.perform(get("/api/dealers")).andExpect(status().isOk());
     }
 
     @Test
     void masterCanLogInAndOut() throws Exception {
-        mockMvc.perform(formLogin("/api/auth/login").user("master").password("scratch-the-truth"))
+        mockMvc.perform(formLogin("/api/auth/login").user("master").password("test-password"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("master"));
 
@@ -243,7 +250,7 @@ class ApiEndpointsIntegrationTest {
                 .andExpect(jsonPath("$.ticketsAdded").value(500));
 
         // The game's pool doubled and the new books are allocated to the stocking shops.
-        mockMvc.perform(get("/api/house/overview").with(user("master").roles("MASTER")))
+        mockMvc.perform(get("/api/house/overview"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.games[0].totalTickets").value(1000))
                 .andExpect(jsonPath("$.games[0].books.total").value(40));
@@ -329,11 +336,30 @@ class ApiEndpointsIntegrationTest {
     }
 
     @Test
-    void borrowingANonPositiveAmountIs422() throws Exception {
+    void borrowingANonPositiveAmountIsRejectedAtTheBoundary() throws Exception {
         UUID playerId = fundedPlayer();
+        // Bean validation (@Positive) rejects a zero amount before the controller runs: 400.
         mockMvc.perform(post("/api/players/" + playerId + "/borrow")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":0}"))
-                .andExpect(status().isUnprocessableEntity())
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        // A negative amount is likewise rejected at the boundary.
+        mockMvc.perform(post("/api/players/" + playerId + "/borrow")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":-5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        // And an absurdly large amount trips @DecimalMax.
+        mockMvc.perform(post("/api/players/" + playerId + "/borrow")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":2000000}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void creatingAPlayerWithoutADisplayNameIs400() throws Exception {
+        mockMvc.perform(post("/api/players")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
@@ -376,8 +402,16 @@ class ApiEndpointsIntegrationTest {
                 .andExpect(jsonPath("$.isWinner").doesNotExist())
                 .andExpect(jsonPath("$.grid").doesNotExist());
 
-        String body = "{\"playerId\":\"" + fundedPlayer() + "\"}";
-        mockMvc.perform(post("/api/tickets/" + firstTicketId + "/reveal")
+        // Reveal is ownership-gated, so the ticket must be bought first — the buyer then scratches it.
+        UUID playerId = fundedPlayer();
+        String body = "{\"playerId\":\"" + playerId + "\"}";
+        String purchased = mockMvc.perform(post("/api/books/" + bookId + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = com.jayway.jsonpath.JsonPath.read(purchased, "$.ticketId");
+
+        mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(true))
@@ -388,16 +422,77 @@ class ApiEndpointsIntegrationTest {
                 .andExpect(jsonPath("$.grid.cells.length()").value(9))
                 .andExpect(jsonPath("$.grid.cells[0].abstractSymbol").isNotEmpty());
 
-        mockMvc.perform(post("/api/tickets/" + firstTicketId + "/reveal")
+        mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(true))
                 .andExpect(jsonPath("$.grid.cells.length()").value(9));
 
-        mockMvc.perform(get("/api/tickets/" + firstTicketId))
+        mockMvc.perform(get("/api/tickets/" + ticketId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(true))
                 .andExpect(jsonPath("$.grid.cells.length()").value(9));
+    }
+
+    @Test
+    void revealingAnUnsoldTicketIs409() throws Exception {
+        // firstTicketId was never bought, so it has no owner: revealing it is a conflict.
+        mockMvc.perform(post("/api/tickets/" + firstTicketId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"" + fundedPlayer() + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"));
+    }
+
+    @Test
+    void revealingSomeoneElsesTicketIs403() throws Exception {
+        UUID buyer = fundedPlayer();
+        UUID stranger = fundedPlayer();
+        String purchased = mockMvc.perform(post("/api/books/" + bookId + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"" + buyer + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = com.jayway.jsonpath.JsonPath.read(purchased, "$.ticketId");
+
+        // A different player may not reveal (and be credited for) a ticket they did not buy.
+        mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"" + stranger + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("NOT_TICKET_OWNER"));
+    }
+
+    @Test
+    void winningRevealAttributesTheWinToTheStockingShop() throws Exception {
+        // Pick a guaranteed-winning ticket from an allocated book and hand it to a player (bypassing
+        // the sequential purchase so we can land on a specific winner), then scratch it.
+        TicketEntity winner = tickets.findAll().stream()
+                .filter(t -> t.getBookId() != null)
+                .filter(t -> t.getPrizeAmount().signum() > 0)
+                .filter(t -> books.findById(t.getBookId())
+                        .map(b -> b.getDealerId() != null).orElse(false))
+                .findFirst()
+                .orElseThrow();
+        UUID shop = books.findById(winner.getBookId()).orElseThrow().getDealerId();
+
+        UUID playerId = fundedPlayer();
+        winner.setStatus(com.luckledger.domain.scratch.TicketStatus.SOLD);
+        winner.setPlayerId(playerId);
+        tickets.save(winner);
+
+        mockMvc.perform(post("/api/tickets/" + winner.getId() + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"" + playerId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isWinner").value(true));
+
+        // The WIN carried the book's shop id, so the player's per-shop comparison shows a real payout.
+        String comparison = mockMvc.perform(get("/api/ledger/" + playerId + "/dealer-comparison"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Number wonAtShop = com.jayway.jsonpath.JsonPath.read(comparison, "$['" + shop + "'].totalWon");
+        org.assertj.core.api.Assertions.assertThat(wonAtShop.doubleValue()).isGreaterThan(0.0);
     }
 
     @Test
