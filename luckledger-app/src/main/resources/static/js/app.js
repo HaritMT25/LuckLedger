@@ -437,9 +437,11 @@ async function renderDealerBooks(dealerId) {
         for (const group of byGame.values()) {
             group.books.sort((a, b) => a.bookId.localeCompare(b.bookId));
             const topPrize = topPrizeByGame.get(group.books[0].gameId);
+            const mechanic = group.books[0].mechanic;
             html += `<section class="game-group">
-                <h3 class="game-group-title">${MECHANIC_EMOJI[group.books[0].mechanic] || '🎟️'} ${escapeHtml(group.name)}
-                    ${topPrize ? `<span class="top-prize">Top prize ${money(topPrize)} coins</span>` : ''}</h3>
+                <h3 class="game-group-title">${MECHANIC_EMOJI[mechanic] || '🎟️'} ${escapeHtml(group.name)}
+                    ${topPrize ? `<span class="top-prize">Top prize ${money(topPrize)} coins</span>` : ''}
+                    ${mechanic ? `<button type="button" class="how-it-works" data-mechanic-info="${escapeHtml(mechanic)}">❓ How this game works</button>` : ''}</h3>
                 <div class="grid">
                     ${group.books.map((b, i) => bookCard(b, i)).join('')}
                 </div>
@@ -448,6 +450,9 @@ async function renderDealerBooks(dealerId) {
         body.innerHTML = html;
         body.querySelectorAll('button[data-book]').forEach((btn) => {
             btn.onclick = () => buyTicket(btn.dataset.book, btn.dataset.mechanic, btn);
+        });
+        body.querySelectorAll('button[data-mechanic-info]').forEach((btn) => {
+            btn.onclick = () => openMechanicModal(btn.dataset.mechanicInfo);
         });
     } catch (e) {
         const body = document.getElementById('shop-body');
@@ -539,6 +544,69 @@ async function buyTicket(bookId, mechanic, btn) {
     }
 }
 
+// ---- "how this game works" modal -------------------------------------------
+
+/* The compact glyph for an example-grid cell: seal symbols become their icon, numbers show as-is. */
+function miniCellGlyph(symbol) {
+    return SEAL_ICON[symbol] || symbol;
+}
+
+/* Renders a mechanic's example grid (a GridDto) as a compact glyph grid. */
+function miniGrid(grid) {
+    if (!grid || !grid.cells) return '';
+    const cells = [...grid.cells].sort((a, b) => a.row - b.row || a.col - b.col);
+    const dim = grid.dimension || Math.round(Math.sqrt(cells.length));
+    return `<div class="mini-grid" style="grid-template-columns:repeat(${dim},1fr)">
+        ${cells.map((c) => {
+            const seal = SEAL_ICON[c.symbol];
+            return `<span class="mini-cell${seal ? ` seal-${String(c.symbol).toLowerCase()}` : ''}">${escapeHtml(miniCellGlyph(c.symbol))}</span>`;
+        }).join('')}
+    </div>`;
+}
+
+/* An education modal for a mechanic: display name, description, the fixed prize ladder, and two
+   example mini-grids (win + loss). The ladder is printed at generation time — seeing it changes
+   nothing about the sealed pool. */
+async function openMechanicModal(type) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal-card"><p class="empty">Loading…</p></div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function esc(e) {
+        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+    });
+
+    const card = overlay.querySelector('.modal-card');
+    let detail;
+    try {
+        detail = await Api.mechanicDetail(type);
+    } catch (e) {
+        card.innerHTML = `<button class="modal-close" aria-label="Close">✕</button>
+            <p class="empty">${escapeHtml(e.message)}</p>`;
+        card.querySelector('.modal-close').onclick = close;
+        return;
+    }
+    const rules = (detail.winRules || []).map((r) => `
+        <tr><td>${r.threshold}</td><td>${escapeHtml(r.description)}</td></tr>`).join('');
+    card.innerHTML = `
+        <button class="modal-close" aria-label="Close">✕</button>
+        <h3>${MECHANIC_EMOJI[detail.type] || '🎟️'} ${escapeHtml(detail.displayName)} — how it works</h3>
+        <p class="modal-desc">${escapeHtml(detail.description)}</p>
+        <table class="rules-table">
+            <thead><tr><th>Reach</th><th>Prize</th></tr></thead>
+            <tbody>${rules}</tbody>
+        </table>
+        <div class="mini-examples">
+            <figure><figcaption>Example win</figcaption>${miniGrid(detail.exampleWin)}</figure>
+            <figure><figcaption>Example loss</figcaption>${miniGrid(detail.exampleLoss)}</figure>
+        </div>
+        <p class="hint">The prize ladder is fixed when the cards are printed. Seeing the rules doesn't
+            change the sealed pool — every ticket was already decided.</p>`;
+    card.querySelector('.modal-close').onclick = close;
+}
+
 // ---- scratch ---------------------------------------------------------------
 
 // Cached scratch-zone config (config/scratch-zones.json); loaded once and reused.
@@ -556,52 +624,57 @@ function cellsRowMajor(grid) {
 }
 
 /* Celestial Fortune: row 0 holds the 4 winning numbers, rows 1–2 the player's 8 numbers, row 3 inert
-   decoys. Maps each scratch zone (win-1..4, num-1..12) to its real value and flags actual matches. */
+   decoys. PURE PLACEMENT: maps each scratch zone (win-1..4, num-1..12) to its cell's value and grid
+   coordinates. It no longer decides what "counts" — the backend narrative (matchedPositions) drives
+   the match highlighting. */
 function celestialZoneValues(grid) {
     const cells = cellsRowMajor(grid);
-    const winningCells = cells.filter((c) => c.row === 0);
-    const winningSet = new Set(winningCells.map((c) => c.abstractSymbol));
     const byZone = {};
-    winningCells.forEach((c, i) => {
-        byZone[`win-${i + 1}`] = { text: c.displayLabel || c.abstractSymbol, kind: 'win' };
+    cells.filter((c) => c.row === 0).forEach((c, i) => {
+        byZone[`win-${i + 1}`] = { text: c.displayLabel || c.abstractSymbol, kind: 'win', row: c.row, col: c.col };
     });
-    let matchCount = 0;
     cells.filter((c) => c.row >= 1).forEach((c, i) => {
-        const matched = c.row <= 2 && winningSet.has(c.abstractSymbol); // decoy row (3) never matches
-        if (matched) matchCount++;
-        byZone[`num-${i + 1}`] = { text: c.displayLabel || c.abstractSymbol, kind: matched ? 'match' : 'plain' };
+        byZone[`num-${i + 1}`] = { text: c.displayLabel || c.abstractSymbol, kind: 'plain', row: c.row, col: c.col };
     });
-    return { byZone, matchCount };
+    return { byZone };
 }
 
-/* Demon Seal: the grid holds exactly 6 seal cells (GOLD/SILVER/BROKEN) among themed decoys. Maps the
-   seals, row-major, onto the 6 seal zones and computes the score T = 2×gold + silver (win at T ≥ 4). */
+/* Demon Seal: the grid holds exactly 6 seal cells (GOLD/SILVER/BROKEN) among themed decoys. PURE
+   PLACEMENT: maps the seals, row-major, onto the 6 seal zones with their grid coordinates. Scoring
+   (T = 2×gold + silver) is the backend's job — the narrative supplies the summary and the scoring
+   positions. */
 function demonZoneSeals(grid) {
     const seals = cellsRowMajor(grid).filter((c) => SEAL_ICON[c.abstractSymbol]);
     const byZone = {};
-    seals.forEach((c, i) => { if (SEAL_ZONE_ORDER[i]) byZone[SEAL_ZONE_ORDER[i]] = c.abstractSymbol; });
-    const gold = seals.filter((c) => c.abstractSymbol === 'GOLD').length;
-    const silver = seals.filter((c) => c.abstractSymbol === 'SILVER').length;
-    return { byZone, gold, silver, score: 2 * gold + silver };
+    seals.forEach((c, i) => {
+        if (SEAL_ZONE_ORDER[i]) byZone[SEAL_ZONE_ORDER[i]] = { symbol: c.abstractSymbol, row: c.row, col: c.col };
+    });
+    return { byZone };
 }
 
 /* Renders the ticket's REAL hidden values into the dark reveal layer, one element per scratch zone.
-   Each element carries its zone id so the scratch engine's 'zonereveal' events can pop it. */
-function drawRevealLayer(layer, zones, mechanic, gridData) {
+   Each element carries its zone id so the scratch engine's 'zonereveal' events can pop it. The
+   backend narrative's matched/scoring positions (a Set of "row,col") drive the highlight class —
+   the client no longer decides which cells count. */
+function drawRevealLayer(layer, zones, mechanic, gridData, matchedSet) {
     layer.innerHTML = '';
     for (const z of zones) {
         const cx = z.shape === 'circle' ? z.cx : z.x + z.w / 2;
         const cy = z.shape === 'circle' ? z.cy : z.y + z.h / 2;
         let el;
         if (mechanic === 'DEMON_SEAL') {
-            const kind = gridData.byZone[z.id] || 'BROKEN';
+            const cell = gridData.byZone[z.id] || { symbol: 'BROKEN' };
+            const symbol = cell.symbol || 'BROKEN';
+            const scoring = matchedSet.has(`${cell.row},${cell.col}`);
             el = document.createElement('div');
-            el.className = 'seal-reveal ' + kind.toLowerCase();
-            el.innerHTML = `<span class="seal-icon">${SEAL_ICON[kind]}</span><span class="seal-label">${kind}</span>`;
+            el.className = 'seal-reveal ' + symbol.toLowerCase() + (scoring ? ' scoring' : '');
+            el.innerHTML = `<span class="seal-icon">${SEAL_ICON[symbol]}</span><span class="seal-label">${symbol}</span>`;
         } else {
             const v = gridData.byZone[z.id] || { text: '?', kind: 'plain' };
+            const matched = matchedSet.has(`${v.row},${v.col}`);
+            const kind = matched ? 'match' : v.kind;
             el = document.createElement('span');
-            el.className = 'value-label' + (v.kind !== 'plain' ? ` ${v.kind}` : '');
+            el.className = 'value-label' + (kind !== 'plain' ? ` ${kind}` : '');
             el.textContent = v.text;
         }
         el.dataset.zone = z.id;
@@ -611,22 +684,14 @@ function drawRevealLayer(layer, zones, mechanic, gridData) {
     }
 }
 
-/* Mechanic-specific outcome detail for the result panel, derived from the real grid. */
-function outcomeDetail(mechanic, gridData, won) {
-    if (mechanic === 'CELESTIAL_FORTUNE') {
-        const n = gridData.matchCount;
-        if (won) return `You matched ${n} of the 4 winning numbers.`;
-        if (n === 1) return 'You matched 1 winning number — one short of a prize. That near-miss is by design.';
-        return 'None of your numbers matched the winning row.';
+/* The set of "row,col" keys the backend narrative flagged as matched/scoring, for cell highlighting.
+   Empty when there is no narrative (e.g. the sacred-payout guard tripped). */
+function matchedPositionSet(narrative) {
+    const set = new Set();
+    if (narrative && Array.isArray(narrative.matchedPositions)) {
+        for (const p of narrative.matchedPositions) set.add(`${p.row},${p.col}`);
     }
-    if (mechanic === 'DEMON_SEAL') {
-        const { gold, silver, score } = gridData;
-        const tally = `✦×${gold} gold, ✧×${silver} silver — seal score ${score}`;
-        if (won) return `${tally}. The demon is sealed.`;
-        if (score === 3) return `${tally}. One point short of the 4 needed — that near-miss is by design.`;
-        return `${tally}. You needed 4 to win.`;
-    }
-    return '';
+    return set;
 }
 
 async function renderScratch() {
@@ -712,10 +777,15 @@ async function renderScratch() {
     const gridData = t.mechanic === 'DEMON_SEAL'
         ? demonZoneSeals(outcome.grid)
         : celestialZoneValues(outcome.grid);
-    drawRevealLayer(revealLayer, zones, t.mechanic, gridData);
+    // Highlighting and the result detail are backend-served: the narrative flags the cells that count
+    // and supplies the summary sentence. If it is absent (guard tripped), degrade gracefully — the
+    // banner shows the prize only, with no detail line, and no cells are highlighted.
+    const matchedSet = matchedPositionSet(outcome.narrative);
+    drawRevealLayer(revealLayer, zones, t.mechanic, gridData, matchedSet);
 
     const onReveal = async () => {
-        showResult(outcome, won, outcomeDetail(t.mechanic, gridData, won), t);
+        const detail = outcome.narrative ? outcome.narrative.summary : '';
+        showResult(outcome, won, detail, t);
         await refreshPlayer();
     };
     const controller = initScratch(canvas, art, onReveal);

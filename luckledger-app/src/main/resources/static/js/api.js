@@ -71,6 +71,7 @@ const Api = (() => {
         dealerBooks: (id) => request('GET', `/dealers/${id}/books`),
         games: () => request('GET', '/games'),
         nearMisses: (gameId) => request('GET', `/games/${gameId}/near-misses`),
+        mechanicDetail: (type) => request('GET', `/mechanics/${type}`),
         // auth & master
         login,
         logout: () => request('POST', '/auth/logout'),
