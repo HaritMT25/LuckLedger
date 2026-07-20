@@ -58,12 +58,13 @@ public class RevealGateway {
     }
 
     /**
-     * The outcome of a reveal: the win/prize flags plus the ticket's themed grid, so the frontend can
-     * draw the player's real symbols under the scratch coating. The grid was verified at generation
-     * time; serving it after reveal leaks nothing about unsold tickets.
+     * The outcome of a reveal: the win/prize flags, the ticket's themed grid (so the frontend can draw
+     * the player's real symbols under the scratch coating), and the underlying mechanic {@code grid}
+     * (so the reveal narrative can be derived from it). Both grids were verified at generation time;
+     * serving them after reveal leaks nothing about unsold tickets.
      */
     public record RevealOutcome(UUID ticketId, UUID gameId, MechanicType mechanicType, boolean winner,
-            BigDecimal prizeAmount, GridCodec.ThemedGridDto skinnedGrid) {}
+            BigDecimal prizeAmount, GridCodec.ThemedGridDto skinnedGrid, GridCodec.GridDto grid) {}
 
     /**
      * Reveals a ticket, crediting {@code playerId} and recording a WIN if it wins. Idempotent per ticket.
@@ -93,7 +94,7 @@ public class RevealGateway {
             return new RevealOutcome(
                     ticketId, ticket.getGameId(), ticket.getMechanicType(),
                     Boolean.TRUE.equals(ticket.getRevealedIsWinner()), ticket.getRevealedPrize(),
-                    ticket.getSkinnedGrid());
+                    ticket.getSkinnedGrid(), ticket.getGrid());
         }
 
         BigDecimal prize = ticket.getPrizeAmount();
@@ -122,6 +123,7 @@ public class RevealGateway {
         ticket.markRevealed(winner, prize);
         tickets.save(ticket);
         return new RevealOutcome(
-                ticketId, ticket.getGameId(), ticket.getMechanicType(), winner, prize, ticket.getSkinnedGrid());
+                ticketId, ticket.getGameId(), ticket.getMechanicType(), winner, prize,
+                ticket.getSkinnedGrid(), ticket.getGrid());
     }
 }

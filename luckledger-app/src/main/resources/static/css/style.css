@@ -556,6 +556,55 @@ tbody tr:hover { background: rgba(139, 92, 246, .06); }
 
 .footer { padding: 1rem 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .8rem; text-align: center; }
 
+/* ---- "how this game works" modal ------------------------------------------------ */
+.how-it-works {
+    margin-left: .6rem; font-size: .78rem; font-weight: 600;
+    color: var(--accent-2); background: rgba(139, 92, 246, .1);
+    border: 1px solid var(--border-bright); border-radius: 999px;
+    padding: .18rem .6rem; cursor: pointer; vertical-align: middle;
+}
+.how-it-works:hover { background: rgba(139, 92, 246, .2); }
+
+.modal-overlay {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 1rem;
+    background: rgba(6, 4, 12, .72);
+}
+.modal-card {
+    position: relative; width: min(560px, 100%); max-height: 88vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border-bright);
+    border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.4rem 1.5rem;
+}
+.modal-card h3 { margin: 0 0 .6rem; color: var(--gold); }
+.modal-desc { color: var(--muted); font-size: .9rem; margin: 0 0 1rem; }
+.modal-close {
+    position: absolute; top: .7rem; right: .7rem; width: 30px; height: 30px;
+    border-radius: 50%; border: 1px solid var(--border); background: var(--panel-2);
+    color: var(--ink); cursor: pointer; font-size: .9rem; line-height: 1;
+}
+.modal-close:hover { background: var(--border); }
+
+.rules-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: .85rem; }
+.rules-table th, .rules-table td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--border); }
+.rules-table th { color: var(--muted); font-weight: 600; }
+
+.mini-examples { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-bottom: .8rem; }
+.mini-examples figure { margin: 0; }
+.mini-examples figcaption { color: var(--muted); font-size: .78rem; margin-bottom: .35rem; }
+.mini-grid { display: grid; gap: 3px; }
+.mini-cell {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 6px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    font-size: .8rem; font-weight: 700; color: var(--ink);
+}
+.mini-cell.seal-gold { background: radial-gradient(circle at 50% 38%, #fff3b0, #d4a017 72%); color: #3a2c00; }
+.mini-cell.seal-silver { background: radial-gradient(circle at 50% 38%, #ffffff, #98a2ad 72%); color: #232f3a; }
+.mini-cell.seal-broken { background: #15131f; color: #6b6478; border: 1px dashed #4a4360; }
+
+/* A scoring seal (gold/silver flagged by the reveal narrative) gets a subtle winning ring. */
+.seal-reveal.scoring { box-shadow: 0 0 14px 3px rgba(255, 200, 40, .85); }
+
 /* ---- motion safety -------------------------------------------------------------
    attachHoloTilt() and burstConfetti() already no-op under reduced motion; this kills the
    remaining CSS-driven movement. */

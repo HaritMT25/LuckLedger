@@ -34,14 +34,16 @@ public class TicketController {
     private final TicketRepository tickets;
     private final PurchaseGateway purchaseGateway;
     private final RevealGateway revealGateway;
+    private final RevealNarrator revealNarrator;
 
     public TicketController(GameStore gameStore, PlayerRegistry playerRegistry, TicketRepository tickets,
-            PurchaseGateway purchaseGateway, RevealGateway revealGateway) {
+            PurchaseGateway purchaseGateway, RevealGateway revealGateway, RevealNarrator revealNarrator) {
         this.gameStore = gameStore;
         this.playerRegistry = playerRegistry;
         this.tickets = tickets;
         this.purchaseGateway = purchaseGateway;
         this.revealGateway = revealGateway;
+        this.revealNarrator = revealNarrator;
     }
 
     @PostMapping("/api/books/{bookId}/purchase")
@@ -52,13 +54,20 @@ public class TicketController {
     @GetMapping("/api/tickets/{ticketId}")
     public TicketView get(@PathVariable UUID ticketId) {
         TicketEntity ticket = gameStore.ticket(ticketId);
-        return ticket.isRevealed() ? TicketView.revealed(ticket) : TicketView.masked(ticket);
+        if (!ticket.isRevealed()) {
+            return TicketView.masked(ticket);
+        }
+        OutcomeNarrative narrative = revealNarrator.narrate(
+                ticket.getGrid(), ticket.getMechanicType(), ticket.getPrizeAmount(), ticket.getId());
+        return TicketView.revealed(ticket, narrative);
     }
 
     @PostMapping("/api/tickets/{ticketId}/reveal")
     public TicketView reveal(@PathVariable UUID ticketId, @Valid @RequestBody PlayerRequest request) {
         RevealOutcome outcome = revealGateway.reveal(ticketId, request.playerId());
-        return TicketView.revealed(outcome);
+        OutcomeNarrative narrative = revealNarrator.narrate(
+                outcome.grid(), outcome.mechanicType(), outcome.prizeAmount(), outcome.ticketId());
+        return TicketView.revealed(outcome, narrative);
     }
 
     /** A player's bought-but-unscratched tickets, oldest first. 404 if the player does not exist. */
@@ -81,19 +90,22 @@ public class TicketController {
     public record PendingTicket(UUID ticketId, String mechanic, UUID gameId, String gameName, UUID bookId) {}
 
     /**
-     * Masked before reveal ({@code isWinner}/{@code prizeAmount}/{@code grid} null); full after. The
-     * grid is the themed grid persisted at generation time — the actual symbols under the coating.
+     * Masked before reveal ({@code isWinner}/{@code prizeAmount}/{@code grid}/{@code narrative} null);
+     * full after. The grid is the themed grid persisted at generation time — the actual symbols under
+     * the coating. The {@code narrative} is a read-only, education-layer explanation of the outcome;
+     * it is null before reveal and null if the sacred-payout guard tripped, and it never affects the
+     * prize (that always follows the stored amount).
      */
     public record TicketView(
             UUID ticketId, UUID gameId, String mechanic, boolean revealed, Boolean isWinner,
-            BigDecimal prizeAmount, GridCodec.ThemedGridDto grid) {
+            BigDecimal prizeAmount, GridCodec.ThemedGridDto grid, OutcomeNarrative narrative) {
 
         static TicketView masked(TicketEntity ticket) {
             return new TicketView(
-                    ticket.getId(), ticket.getGameId(), ticket.getMechanicType().name(), false, null, null, null);
+                    ticket.getId(), ticket.getGameId(), ticket.getMechanicType().name(), false, null, null, null, null);
         }
 
-        static TicketView revealed(TicketEntity ticket) {
+        static TicketView revealed(TicketEntity ticket, OutcomeNarrative narrative) {
             return new TicketView(
                     ticket.getId(),
                     ticket.getGameId(),
@@ -101,10 +113,11 @@ public class TicketController {
                     true,
                     ticket.getRevealedIsWinner(),
                     ticket.getRevealedPrize(),
-                    ticket.getSkinnedGrid());
+                    ticket.getSkinnedGrid(),
+                    narrative);
         }
 
-        static TicketView revealed(RevealOutcome outcome) {
+        static TicketView revealed(RevealOutcome outcome, OutcomeNarrative narrative) {
             return new TicketView(
                     outcome.ticketId(),
                     outcome.gameId(),
@@ -112,7 +125,8 @@ public class TicketController {
                     true,
                     outcome.winner(),
                     outcome.prizeAmount(),
-                    outcome.skinnedGrid());
+                    outcome.skinnedGrid(),
+                    narrative);
         }
     }
 }

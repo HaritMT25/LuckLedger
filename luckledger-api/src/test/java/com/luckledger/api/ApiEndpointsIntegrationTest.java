@@ -57,6 +57,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         PlayerRegistry.class,
         PurchaseGateway.class,
         RevealGateway.class,
+        RevealNarrator.class,
         GameController.class,
         BookController.class,
         DealerController.class,
@@ -578,6 +579,53 @@ class ApiEndpointsIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.revealed").value(true))
                 .andExpect(jsonPath("$.grid.cells.length()").value(9));
+    }
+
+    @Test
+    void revealCarriesABackendServedNarrativeConsistentWithThePrize() throws Exception {
+        // Pre-reveal: the masked view carries NO narrative (the outcome is not decided for the client yet).
+        mockMvc.perform(get("/api/tickets/" + firstTicketId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revealed").value(false))
+                .andExpect(jsonPath("$.narrative").doesNotExist());
+
+        UUID playerId = fundedPlayer();
+        String body = "{\"playerId\":\"" + playerId + "\"}";
+        String purchased = mockMvc.perform(post("/api/books/" + bookId + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = JsonPath.read(purchased, "$.ticketId");
+
+        // Revealed (seeded game is Demon Seal): the narrative is present, in the education voice, and its
+        // seal score is consistent with the prize (a winner scores at least the 4-point floor).
+        String revealed = mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.narrative").exists())
+                .andExpect(jsonPath("$.narrative.summary").isNotEmpty())
+                .andExpect(jsonPath("$.narrative.sealScore").isNumber())
+                .andExpect(jsonPath("$.narrative.pointsNeeded").value(4))
+                .andExpect(jsonPath("$.narrative.matchedPositions").isArray())
+                .andReturn().getResponse().getContentAsString();
+
+        boolean winner = JsonPath.read(revealed, "$.isWinner");
+        int sealScore = JsonPath.read(revealed, "$.narrative.sealScore");
+        BigDecimal prize = new BigDecimal(JsonPath.read(revealed, "$.prizeAmount").toString());
+        if (winner) {
+            assertThat(sealScore).isGreaterThanOrEqualTo(4);
+            assertThat(prize).isGreaterThan(BigDecimal.ZERO);
+            assertThat(((Boolean) JsonPath.read(revealed, "$.narrative.nearMiss"))).isFalse();
+        } else {
+            assertThat(sealScore).isLessThan(4);
+            assertThat(prize).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+
+        // The re-read revealed view carries the same narrative shape (idempotent, still explained).
+        mockMvc.perform(get("/api/tickets/" + ticketId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.narrative.summary").isNotEmpty())
+                .andExpect(jsonPath("$.narrative.sealScore").isNumber());
     }
 
     @Test
