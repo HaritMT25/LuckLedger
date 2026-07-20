@@ -5,9 +5,11 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.jayway.jsonpath.JsonPath;
 import com.luckledger.api.persistence.DealerEntity;
 import com.luckledger.api.persistence.DealerRepository;
 import com.luckledger.api.persistence.GamePersistenceMapper;
@@ -19,7 +21,11 @@ import com.luckledger.api.persistence.TicketBookEntity;
 import com.luckledger.api.persistence.TicketBookRepository;
 import com.luckledger.api.persistence.TicketEntity;
 import com.luckledger.api.persistence.TicketRepository;
+import com.luckledger.distribution.DealerTier;
 import com.luckledger.distribution.GameSetupResult;
+import com.luckledger.domain.generation.MetadataVisibility;
+import com.luckledger.domain.mechanic.MechanicType;
+import com.luckledger.domain.scratch.TicketStatus;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -296,6 +302,146 @@ class ApiEndpointsIntegrationTest {
 
         mockMvc.perform(get("/api/books/" + UUID.randomUUID()))
                 .andExpect(status().isNotFound());
+    }
+
+    // --- book metadata visibility (§3.12) ------------------------------------
+
+    @Test
+    void bookVisibilityIsEnforcedServerSidePerTier() throws Exception {
+        // Reuse the seeded game's allocated shop; attach one 3-ticket book per visibility tier to it,
+        // with a known winner (10) at position 0 so a FULL book's numbers can be reconciled after a reveal.
+        UUID none = tierBook(MetadataVisibility.NONE);
+        UUID partial = tierBook(MetadataVisibility.PARTIAL);
+        UUID full = tierBook(MetadataVisibility.FULL);
+
+        // NONE: counts only — every data field is withheld server-side.
+        mockMvc.perform(get("/api/books/" + none))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.visibility").value("NONE"))
+                .andExpect(jsonPath("$.totalTickets").value(3))
+                .andExpect(jsonPath("$.percentDispensed").doesNotExist())
+                .andExpect(jsonPath("$.prizesDispensed").doesNotExist())
+                .andExpect(jsonPath("$.estimatedRemainingValue").doesNotExist())
+                .andExpect(jsonPath("$.winFrequencySoFar").doesNotExist());
+
+        // PARTIAL: percentDispensed only; the value fields stay withheld.
+        mockMvc.perform(get("/api/books/" + partial))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.visibility").value("PARTIAL"))
+                .andExpect(jsonPath("$.percentDispensed").exists())
+                .andExpect(jsonPath("$.prizesDispensed").doesNotExist())
+                .andExpect(jsonPath("$.estimatedRemainingValue").doesNotExist())
+                .andExpect(jsonPath("$.winFrequencySoFar").doesNotExist());
+
+        // FULL: everything present, and before any reveal nothing has been dispensed yet — but the whole
+        // 10-coin prize fund is already known (it was fixed at print time).
+        String fresh = mockMvc.perform(get("/api/books/" + full))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.visibility").value("FULL"))
+                .andExpect(jsonPath("$.percentDispensed").exists())
+                .andExpect(jsonPath("$.prizesDispensed").exists())
+                .andExpect(jsonPath("$.estimatedRemainingValue").exists())
+                .andExpect(jsonPath("$.winFrequencySoFar").value(0))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(new BigDecimal(JsonPath.read(fresh, "$.prizesDispensed").toString()))
+                .isEqualByComparingTo("0");
+        assertThat(new BigDecimal(JsonPath.read(fresh, "$.estimatedRemainingValue").toString()))
+                .isEqualByComparingTo("10");
+
+        // Buy and scratch the FULL book's position-0 ticket (the known 10-coin winner), through the
+        // ownership-gated reveal, then confirm the FULL numbers reconcile against what was revealed.
+        UUID playerId = fundedPlayer();
+        String body = "{\"playerId\":\"" + playerId + "\"}";
+        String purchased = mockMvc.perform(post("/api/books/" + full + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = JsonPath.read(purchased, "$.ticketId");
+        mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isWinner").value(true));
+
+        TicketEntity revealed = tickets.findById(UUID.fromString(ticketId)).orElseThrow();
+        String reconciled = mockMvc.perform(get("/api/books/" + full))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(new BigDecimal(JsonPath.read(reconciled, "$.prizesDispensed").toString()))
+                .isEqualByComparingTo(revealed.getRevealedPrize());
+        assertThat(new BigDecimal(JsonPath.read(reconciled, "$.estimatedRemainingValue").toString()))
+                .isEqualByComparingTo("0"); // the 10-coin winner was the whole fund
+        assertThat(((Number) JsonPath.read(reconciled, "$.winFrequencySoFar")).longValue()).isEqualTo(1L);
+        // One of three tickets sold => 33.33% dispensed.
+        assertThat(new BigDecimal(JsonPath.read(reconciled, "$.percentDispensed").toString()))
+                .isGreaterThan(new BigDecimal("33")).isLessThan(new BigDecimal("34"));
+    }
+
+    /**
+     * Attaches a fresh 3-ticket book (positions 0–2, prizes 10/0/0) to the seeded game's allocated shop,
+     * stamped with the given visibility. Reuses an existing ticket's JSONB grids so the rows are valid.
+     */
+    private UUID tierBook(MetadataVisibility visibility) {
+        TicketBookEntity source = books.findById(bookId).orElseThrow();
+        TicketEntity template = tickets.findByBookIdOrderByPositionInBookAsc(bookId).get(0);
+        UUID newBookId = UUID.randomUUID();
+        books.save(new TicketBookEntity(
+                newBookId, gameId, dealerId, source.getPoolContractId(), 3, 0, visibility));
+        BigDecimal[] prizes = {new BigDecimal("10"), BigDecimal.ZERO, BigDecimal.ZERO};
+        for (int position = 0; position < prizes.length; position++) {
+            tickets.save(new TicketEntity(
+                    UUID.randomUUID(), newBookId, gameId, UUID.randomUUID(), MechanicType.DEMON_SEAL,
+                    prizes[position], position, TicketStatus.AVAILABLE,
+                    template.getGrid(), template.getSkinnedGrid()));
+        }
+        return newBookId;
+    }
+
+    // --- shop rankings (§2.3) -------------------------------------------------
+
+    @Test
+    void rankingsAreSortedByBooksDepletedThenShopName() throws Exception {
+        dealers.save(rankShop("Top Shop", 999, DealerTier.TIER_3));
+        dealers.save(rankShop("AAA Shop", 5, DealerTier.TIER_1));
+        dealers.save(rankShop("ZZZ Shop", 5, DealerTier.TIER_1));
+
+        String json = mockMvc.perform(get("/api/dealers/rankings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].rank").value(1))
+                .andExpect(jsonPath("$[0].shopName").value("Top Shop"))
+                .andExpect(jsonPath("$[0].booksDepleted").value(999))
+                .andExpect(jsonPath("$[0].tier").value("TIER_3"))
+                .andExpect(jsonPath("$[0].quartile").value("UPPER"))
+                .andReturn().getResponse().getContentAsString();
+
+        List<Integer> depleted = JsonPath.read(json, "$[*].booksDepleted");
+        for (int i = 1; i < depleted.size(); i++) {
+            assertThat(depleted.get(i)).isLessThanOrEqualTo(depleted.get(i - 1));
+        }
+        List<Integer> ranks = JsonPath.read(json, "$[*].rank");
+        for (int i = 0; i < ranks.size(); i++) {
+            assertThat(ranks.get(i)).isEqualTo(i + 1);
+        }
+        List<String> names = JsonPath.read(json, "$[*].shopName");
+        assertThat(names.indexOf("AAA Shop")).isLessThan(names.indexOf("ZZZ Shop"));
+    }
+
+    @Test
+    void rankingsRouteIsNotSwallowedByTheDealerIdPathVariable() throws Exception {
+        // "rankings" must reach the rankings handler, not be parsed as a {dealerId} UUID (which would
+        // 400 via the MethodArgumentTypeMismatch handler).
+        mockMvc.perform(get("/api/dealers/rankings"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+        // A genuinely malformed id still 400s through the type-mismatch handler.
+        mockMvc.perform(get("/api/dealers/not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
+    }
+
+    private DealerEntity rankShop(String shopName, int booksDepleted, DealerTier tier) {
+        return new DealerEntity(
+                UUID.randomUUID(), shopName, "Owner", null, List.of(), tier, 0, 50, booksDepleted);
     }
 
     @Test

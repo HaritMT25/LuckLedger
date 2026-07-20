@@ -1,5 +1,6 @@
 package com.luckledger.api.persistence;
 
+import com.luckledger.domain.generation.NearMissMode;
 import com.luckledger.domain.generation.verification.NearMissReport;
 import com.luckledger.domain.generation.verification.VerificationReport;
 import com.luckledger.domain.mechanic.MechanicType;
@@ -48,6 +49,11 @@ public class GameEntity {
     @Column(name = "dealer_count", nullable = false)
     private int dealerCount;
 
+    /** The mode the pool was generated with (drives the awareness layer's near-miss narration). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "near_miss_mode", nullable = false, length = 20)
+    private NearMissMode nearMissMode;
+
     @Column(name = "verification_passed", nullable = false)
     private boolean verificationPassed;
 
@@ -68,7 +74,8 @@ public class GameEntity {
     protected GameEntity() {}
 
     public GameEntity(UUID id, MechanicType mechanicType, String themeId, BigDecimal ticketPrice, int totalTickets,
-            BigDecimal payoutRatio, int bookCount, int dealerCount, boolean verificationPassed, long generationTimeMs,
+            BigDecimal payoutRatio, int bookCount, int dealerCount, NearMissMode nearMissMode,
+            boolean verificationPassed, long generationTimeMs,
             NearMissReport nearMiss, VerificationReport verificationReport, Instant createdAt) {
         this.id = id;
         this.mechanicType = mechanicType;
@@ -78,6 +85,7 @@ public class GameEntity {
         this.payoutRatio = payoutRatio;
         this.bookCount = bookCount;
         this.dealerCount = dealerCount;
+        this.nearMissMode = nearMissMode;
         this.verificationPassed = verificationPassed;
         this.generationTimeMs = generationTimeMs;
         this.nearMiss = nearMiss;
@@ -99,6 +107,7 @@ public class GameEntity {
     public BigDecimal getPayoutRatio() { return payoutRatio; }
     public int getBookCount() { return bookCount; }
     public int getDealerCount() { return dealerCount; }
+    public NearMissMode getNearMissMode() { return nearMissMode; }
     public boolean isVerificationPassed() { return verificationPassed; }
     public long getGenerationTimeMs() { return generationTimeMs; }
     public NearMissReport getNearMiss() { return nearMiss; }

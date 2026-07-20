@@ -8,10 +8,14 @@ import com.luckledger.api.persistence.TicketBookEntity;
 import com.luckledger.api.persistence.TicketBookRepository;
 import com.luckledger.api.persistence.TicketEntity;
 import com.luckledger.api.persistence.TicketRepository;
+import com.luckledger.api.persistence.TicketRepository.BookTicketStats;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -89,6 +93,20 @@ public class GameStore {
     public TicketEntity ticket(UUID ticketId) {
         Objects.requireNonNull(ticketId, "ticketId");
         return tickets.findById(ticketId).orElseThrow(() -> notFound("ticket", ticketId));
+    }
+
+    /**
+     * Per-book depletion economics (prize fund, prize value dispensed, wins so far) keyed by book id, for
+     * the book-metadata-visibility feature. Books with no matching rows are simply absent from the map;
+     * callers treat an absent book as all-zero. An empty request returns an empty map without a query.
+     */
+    public Map<UUID, BookTicketStats> bookStats(Collection<UUID> bookIds) {
+        Objects.requireNonNull(bookIds, "bookIds");
+        if (bookIds.isEmpty()) {
+            return Map.of();
+        }
+        return tickets.aggregateByBook(bookIds).stream()
+                .collect(Collectors.toMap(BookTicketStats::getBookId, s -> s));
     }
 
     /** How many of a dealer's books are still selling (cursor has not reached the end). */

@@ -12,6 +12,7 @@ import com.luckledger.distribution.Dealer;
 import com.luckledger.distribution.DealerTier;
 import com.luckledger.distribution.DealerTierResolver;
 import com.luckledger.distribution.GameSetupResult;
+import com.luckledger.domain.generation.MetadataVisibility;
 import com.luckledger.domain.orchestration.GameConfig;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,6 +38,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class GameSeeder implements ApplicationRunner {
 
     private static final int BOOKS_PER_CYCLE = 50;
+
+    /**
+     * The visibility tiers cycled across a game's books (index % 3) so the demo shows all three at once.
+     * The rotation is deterministic and purely a presentation device — every book of a game still has
+     * identical per-ticket odds; only how much depletion history is shown differs.
+     */
+    private static final MetadataVisibility[] VISIBILITY_ROTATION = {
+            MetadataVisibility.NONE, MetadataVisibility.PARTIAL, MetadataVisibility.FULL};
 
     private final GameOrchestrator celestialOrchestrator;
     private final GameOrchestrator demonOrchestrator;
@@ -104,10 +113,19 @@ public class GameSeeder implements ApplicationRunner {
 
     private void seed(GameConfig config, GameOrchestrator orchestrator, UUID gameId, List<DealerEntity> stockingShops) {
         GameSetupResult setup = orchestrator.setup(config, dealerSlots(stockingShops));
-        PersistedGame persisted = GamePersistenceMapper.toPersisted(gameId, config, setup, Instant.now());
+        PersistedGame persisted = GamePersistenceMapper.toPersisted(
+                gameId, config, setup, Instant.now(), GameSeeder::rotatedVisibility);
         games.save(persisted.game());
         books.saveAll(persisted.books());
         tickets.saveAll(persisted.tickets());
+    }
+
+    /**
+     * The visibility tier for the book at {@code bookIndex}, rotating NONE → PARTIAL → FULL. Shared with
+     * {@link RestockService} so freshly restocked books get the same rotation.
+     */
+    static MetadataVisibility rotatedVisibility(int bookIndex) {
+        return VISIBILITY_ROTATION[Math.floorMod(bookIndex, VISIBILITY_ROTATION.length)];
     }
 
     private static DealerEntity shop(String shopName, String ownerName, List<UUID> stockedGames, int booksDepleted) {

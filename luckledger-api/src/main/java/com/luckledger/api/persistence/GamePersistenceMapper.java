@@ -3,6 +3,7 @@ package com.luckledger.api.persistence;
 import com.luckledger.distribution.GameSetupResult;
 import com.luckledger.distribution.TicketBook;
 import com.luckledger.domain.generation.GenerationResult;
+import com.luckledger.domain.generation.MetadataVisibility;
 import com.luckledger.domain.generation.TicketCard;
 import com.luckledger.domain.orchestration.GameConfig;
 import com.luckledger.domain.scratch.TicketStatus;
@@ -12,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.IntFunction;
 
 /**
  * Flattens an in-memory {@link GameSetupResult} (plus the {@link GameConfig} it was built from) into
@@ -38,7 +40,8 @@ public final class GamePersistenceMapper {
             List<TicketEntity> tickets) {}
 
     /**
-     * Maps a game's setup into its persistable entities.
+     * Maps a game's setup into its persistable entities, stamping every book with the config's default
+     * {@link MetadataVisibility}.
      *
      * @param gameId the id to assign the game; never {@code null}
      * @param config the config the game was built from; never {@code null}
@@ -47,6 +50,26 @@ public final class GamePersistenceMapper {
      */
     public static PersistedGame toPersisted(
             UUID gameId, GameConfig config, GameSetupResult setup, Instant createdAt) {
+        return toPersisted(gameId, config, setup, createdAt, index -> config.bookMetadataVisibility());
+    }
+
+    /**
+     * Maps a game's setup into its persistable entities, choosing each book's {@link MetadataVisibility}
+     * from its position in the game's book list via {@code visibilityByBookIndex}. This is the policy
+     * hook the seeder/restock use to rotate visibility tiers across a game's books for demo variety; the
+     * mapper only supplies the mechanism. The game itself is stamped with the config's
+     * {@link com.luckledger.domain.generation.NearMissMode} — the mode the pool was generated with.
+     *
+     * @param gameId the id to assign the game; never {@code null}
+     * @param config the config the game was built from; never {@code null}
+     * @param setup the generated/partitioned/allocated game; never {@code null}
+     * @param createdAt the creation timestamp to stamp on the game; never {@code null}
+     * @param visibilityByBookIndex maps a book's 0-based index (partition order) to its visibility tier;
+     *     never {@code null}
+     */
+    public static PersistedGame toPersisted(
+            UUID gameId, GameConfig config, GameSetupResult setup, Instant createdAt,
+            IntFunction<MetadataVisibility> visibilityByBookIndex) {
         GenerationResult generation = setup.generationResult();
 
         GameEntity game = new GameEntity(
@@ -58,6 +81,7 @@ public final class GamePersistenceMapper {
                 config.poolContract().payoutRatio(),
                 setup.partitionResult().books().size(),
                 setup.dealers().size(),
+                config.nearMissMode(),
                 generation.verificationReport().passed(),
                 generation.generationTimeMs(),
                 generation.nearMissReport(),
@@ -71,14 +95,17 @@ public final class GamePersistenceMapper {
 
         List<TicketBookEntity> bookEntities = new ArrayList<>();
         List<TicketEntity> ticketEntities = new ArrayList<>();
-        for (TicketBook book : setup.partitionResult().books()) {
+        List<TicketBook> partitionBooks = setup.partitionResult().books();
+        for (int bookIndex = 0; bookIndex < partitionBooks.size(); bookIndex++) {
+            TicketBook book = partitionBooks.get(bookIndex);
             bookEntities.add(new TicketBookEntity(
                     book.bookId(),
                     gameId,
                     bookToDealer.get(book.bookId()),
                     book.poolContractId(),
                     book.getTotalTickets(),
-                    book.nextIndex()));
+                    book.nextIndex(),
+                    visibilityByBookIndex.apply(bookIndex)));
 
             List<TicketCard> cards = book.tickets();
             for (int position = 0; position < cards.size(); position++) {

@@ -2,8 +2,12 @@ package com.luckledger.api;
 
 import com.luckledger.api.persistence.DealerEntity;
 import com.luckledger.api.persistence.GameEntity;
+import com.luckledger.api.persistence.TicketBookEntity;
+import com.luckledger.api.persistence.TicketRepository.BookTicketStats;
 import com.luckledger.distribution.AllocationQuartile;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,25 +28,75 @@ public class DealerController {
         this.gameStore = gameStore;
     }
 
+    /**
+     * Lists every shop with its stocked games, tier, quartile, and book counts.
+     *
+     * @return all shops
+     */
     @GetMapping
     public List<DealerDto> list() {
         Map<UUID, String> gameNames = gameNameIndex();
         return gameStore.dealers().stream().map(d -> dto(d, gameNames)).toList();
     }
 
+    /**
+     * The shop leaderboard: shops ranked by how many books they have sold out over their lifetime.
+     *
+     * <p><strong>Education point.</strong> A high rank does not mean a shop is "luckier" or "hotter".
+     * Every book of a game has identical per-ticket odds no matter where it is sold; a shop near the top
+     * simply moved more tickets. Ranking by {@code booksDepleted} makes the debunk concrete — throughput,
+     * not luck, is all this board measures.
+     *
+     * <p>Declared before {@code /{dealerId}} and matched by its literal path, so it is never captured by
+     * the id path variable (which would otherwise reject the word "rankings" as a malformed UUID).
+     *
+     * @return shops ordered by books depleted (descending), ties broken by shop name; ranks start at 1
+     */
+    @GetMapping("/rankings")
+    public List<ShopRanking> rankings() {
+        List<DealerEntity> sorted = gameStore.dealers().stream()
+                .sorted(Comparator.comparingInt(DealerEntity::getBooksDepleted).reversed()
+                        .thenComparing(DealerEntity::getShopName))
+                .toList();
+        List<ShopRanking> ranked = new ArrayList<>(sorted.size());
+        int rank = 1;
+        for (DealerEntity d : sorted) {
+            ranked.add(new ShopRanking(
+                    rank++, d.getId(), d.getShopName(), d.getOwnerName(), d.getTier().name(),
+                    AllocationQuartile.fromTier(d.getTier()).name(), d.getBooksDepleted(),
+                    gameStore.activeBookCount(d.getId())));
+        }
+        return ranked;
+    }
+
+    /**
+     * A single shop by id.
+     *
+     * @param dealerId the shop's id
+     * @return the shop
+     */
     @GetMapping("/{dealerId}")
     public DealerDto get(@PathVariable UUID dealerId) {
         return dto(gameStore.dealer(dealerId), gameNameIndex());
     }
 
-    /** The books a shop stocks — the only way to reach books (there is no flat book catalogue). */
+    /**
+     * The books a shop stocks — the only way to reach books (there is no flat book catalogue). Each
+     * book's depletion data is gated server-side by its visibility tier (see {@link BookController}).
+     *
+     * @param dealerId the shop's id
+     * @return the shop's books as visibility-appropriate metadata DTOs
+     */
     @GetMapping("/{dealerId}/books")
     public List<BookController.BookDto> books(@PathVariable UUID dealerId) {
         gameStore.dealer(dealerId); // 404 if the shop does not exist
         Map<UUID, GameEntity> gamesById = gameStore.games().stream()
                 .collect(Collectors.toMap(GameEntity::getId, g -> g));
-        return gameStore.booksForDealer(dealerId).stream()
-                .map(b -> BookController.toDto(b, gamesById.get(b.getGameId())))
+        List<TicketBookEntity> shopBooks = gameStore.booksForDealer(dealerId);
+        Map<UUID, BookTicketStats> stats = gameStore.bookStats(
+                shopBooks.stream().map(TicketBookEntity::getId).toList());
+        return shopBooks.stream()
+                .map(b -> BookController.toDto(b, gamesById.get(b.getGameId()), stats.get(b.getId())))
                 .toList();
     }
 
@@ -79,4 +133,20 @@ public class DealerController {
     public record DealerDto(
             UUID dealerId, String shopName, String ownerName, String avatar, List<GameRef> games,
             String tier, String quartile, int activeBooks, int booksDepleted) {}
+
+    /**
+     * One row of the shop leaderboard.
+     *
+     * @param rank 1-based position after sorting by books depleted (descending), shop name breaking ties
+     * @param dealerId the shop's id
+     * @param shopName the shop's display name
+     * @param ownerName the shop owner's name
+     * @param tier the shop's distribution tier
+     * @param quartile the allocation band the tier maps to
+     * @param booksDepleted lifetime books sold out — the only quantity this board ranks on
+     * @param activeBooks books still selling right now
+     */
+    public record ShopRanking(
+            int rank, UUID dealerId, String shopName, String ownerName, String tier, String quartile,
+            int booksDepleted, int activeBooks) {}
 }
