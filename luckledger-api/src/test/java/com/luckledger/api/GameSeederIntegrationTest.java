@@ -2,9 +2,12 @@ package com.luckledger.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.luckledger.api.persistence.GameEntity;
 import com.luckledger.api.persistence.GameRepository;
 import com.luckledger.api.persistence.TicketBookRepository;
 import com.luckledger.api.persistence.TicketRepository;
+import com.luckledger.domain.orchestration.GameStatus;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -50,5 +53,22 @@ class GameSeederIntegrationTest {
         assertThat(games.count()).isEqualTo(gameCount);
         assertThat(books.count()).isEqualTo(bookCount);
         assertThat(tickets.count()).isEqualTo(ticketCount);
+    }
+
+    @Test
+    void stampsTheSeedGamesWithNameStatusAndPersistedContract() {
+        List<GameEntity> seeded = games.findAll();
+        assertThat(seeded).hasSize(2);
+        // Every seed game is named, ACTIVE, and carries its exact pool contract for restock.
+        assertThat(seeded).allSatisfy(g -> {
+            assertThat(g.getName()).isNotBlank();
+            assertThat(g.getStatus()).isEqualTo(GameStatus.ACTIVE);
+            assertThat(g.getPoolContract()).isNotNull();
+            // The persisted contract round-trips back to an economically identical pool.
+            assertThat(g.getPoolContract().toDomain().payoutRatio())
+                    .isEqualByComparingTo(g.getPayoutRatio());
+        });
+        assertThat(seeded).extracting(GameEntity::getName)
+                .containsExactlyInAnyOrder("Celestial Fortune", "Demon Seal");
     }
 }

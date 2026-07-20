@@ -6,6 +6,7 @@ import com.luckledger.domain.generation.GenerationResult;
 import com.luckledger.domain.generation.MetadataVisibility;
 import com.luckledger.domain.generation.TicketCard;
 import com.luckledger.domain.orchestration.GameConfig;
+import com.luckledger.domain.orchestration.GameStatus;
 import com.luckledger.domain.scratch.TicketStatus;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -70,10 +71,31 @@ public final class GamePersistenceMapper {
     public static PersistedGame toPersisted(
             UUID gameId, GameConfig config, GameSetupResult setup, Instant createdAt,
             IntFunction<MetadataVisibility> visibilityByBookIndex) {
+        return toPersisted(gameId, null, config, setup, createdAt, null, visibilityByBookIndex);
+    }
+
+    /**
+     * Maps a game's setup into its persistable entities, stamping the campaign {@code name} and the
+     * {@code poolContract} it was generated from onto the game row (a freshly created/seeded game is
+     * always {@link com.luckledger.domain.orchestration.GameStatus#ACTIVE}). This is the path the
+     * campaign creator and the seeder use so a game carries its name and an exact, restockable contract.
+     *
+     * @param gameId the id to assign the game; never {@code null}
+     * @param name the campaign display name to stamp, or {@code null} for a legacy/unnamed game
+     * @param config the config the game was built from; never {@code null}
+     * @param setup the generated/partitioned/allocated game; never {@code null}
+     * @param createdAt the creation timestamp to stamp on the game; never {@code null}
+     * @param poolContract the pool contract document to stamp, or {@code null} for a legacy game
+     * @param visibilityByBookIndex maps a book's 0-based index to its visibility tier; never {@code null}
+     */
+    public static PersistedGame toPersisted(
+            UUID gameId, String name, GameConfig config, GameSetupResult setup, Instant createdAt,
+            PoolContractDoc poolContract, IntFunction<MetadataVisibility> visibilityByBookIndex) {
         GenerationResult generation = setup.generationResult();
 
         GameEntity game = new GameEntity(
                 gameId,
+                name,
                 config.mechanicType(),
                 config.themeId(),
                 config.poolContract().ticketPrice(),
@@ -82,6 +104,8 @@ public final class GamePersistenceMapper {
                 setup.partitionResult().books().size(),
                 setup.dealers().size(),
                 config.nearMissMode(),
+                GameStatus.ACTIVE,
+                poolContract,
                 generation.verificationReport().passed(),
                 generation.generationTimeMs(),
                 generation.nearMissReport(),
