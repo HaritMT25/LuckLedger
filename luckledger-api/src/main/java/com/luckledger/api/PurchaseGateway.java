@@ -92,18 +92,10 @@ public class PurchaseGateway {
                 .orElseThrow(() -> new NoSuchElementException("no game with id " + book.getGameId()));
         BigDecimal price = game.getTicketPrice();
 
-        // Debit first: throws InsufficientBalanceException before a ticket is drawn. The player row is
-        // locked LAST (after the book), per the writer lock-order rule.
-        PlayerEntity playerEntity = players.findByIdForUpdate(playerId)
-                .orElseThrow(() -> new NoSuchElementException("no player with id " + playerId));
-        Player player = PlayerMapper.toDomain(playerEntity);
-        player.debit(price);
-        PlayerMapper.applyTo(player, playerEntity);
-        players.save(playerEntity);
-
-        // Re-load the drawn ticket under a pessimistic write lock and assert it is unsold in the same
-        // transaction. This makes the sale race-safe at the row level independent of the book lock:
-        // SELECT FOR UPDATE + sold-check + write cannot interleave with another sale of this row.
+        // Lock the drawn ticket SECOND (before the player, mirroring RevealGateway's ticket-then-player
+        // order) and assert it is unsold in the same transaction. This makes the sale race-safe at the
+        // row level independent of the book lock: SELECT FOR UPDATE + sold-check + write cannot
+        // interleave with another sale of this row.
         UUID drawnTicketId = tickets.findByBookIdAndPositionInBook(bookId, book.getNextIndex())
                 .map(TicketEntity::getId)
                 .orElseThrow(() -> new NoSuchElementException(
@@ -116,6 +108,15 @@ public class PurchaseGateway {
         ticket.setStatus(TicketStatus.SOLD);
         ticket.setPlayerId(playerId);
         tickets.save(ticket);
+
+        // The player row is locked LAST (after book and ticket), per the writer lock-order rule. An
+        // insufficient balance throws here and rolls the ticket write above back with the transaction.
+        PlayerEntity playerEntity = players.findByIdForUpdate(playerId)
+                .orElseThrow(() -> new NoSuchElementException("no player with id " + playerId));
+        Player player = PlayerMapper.toDomain(playerEntity);
+        player.debit(price);
+        PlayerMapper.applyTo(player, playerEntity);
+        players.save(playerEntity);
 
         book.setNextIndex(book.getNextIndex() + 1);
         books.save(book);
