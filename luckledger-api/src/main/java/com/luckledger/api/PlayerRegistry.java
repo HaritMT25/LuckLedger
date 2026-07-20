@@ -58,7 +58,13 @@ public class PlayerRegistry {
         // Coins carry 4 decimal places everywhere; normalize the request to that scale before it hits
         // the domain so a client sending e.g. 100.00000 cannot smuggle in extra precision.
         BigDecimal normalized = amount.setScale(4, RoundingMode.HALF_UP);
-        PlayerEntity entity = load(playerId);
+        Objects.requireNonNull(playerId, "playerId must not be null");
+        // Lock the player row: borrow mutates balance + running totals and writes them back wholesale
+        // (PlayerMapper.applyTo), so it must serialize against purchase/reveal — which also lock the
+        // player — or it could clobber their committed writes with stale values. The player is the only
+        // lock taken here, so the writer "player LAST" order is trivially satisfied.
+        PlayerEntity entity = players.findByIdForUpdate(playerId)
+                .orElseThrow(() -> new NoSuchElementException("no player with id " + playerId));
         Player player = PlayerMapper.toDomain(entity);
         bankService.borrow(player, normalized); // mutates player + appends BORROW to the ledger
         PlayerMapper.applyTo(player, entity);
