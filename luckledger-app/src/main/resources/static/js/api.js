@@ -80,6 +80,13 @@ const Api = (() => {
         masterPlayers: () => request('GET', '/master/players'),
         grant: (playerId, amount) => request('POST', `/master/players/${playerId}/grant`, { amount }),
         restock: (gameId) => request('POST', `/master/games/${gameId}/restock`),
+        // master campaigns
+        campaigns: () => request('GET', '/master/campaigns'),
+        previewCampaign: (body) => request('POST', '/master/campaigns/preview', body),
+        createCampaign: (body) => request('POST', '/master/campaigns', body),
+        campaignAnalytics: (gameId) => request('GET', `/master/campaigns/${gameId}/analytics`),
+        retireCampaign: (gameId) => request('POST', `/master/campaigns/${gameId}/retire`),
+        activateCampaign: (gameId) => request('POST', `/master/campaigns/${gameId}/activate`),
         // play
         purchase: (bookId, playerId) => request('POST', `/books/${bookId}/purchase`, { playerId }),
         ticket: (ticketId) => request('GET', `/tickets/${ticketId}`),
