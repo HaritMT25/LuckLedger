@@ -542,6 +542,77 @@ tbody tr:hover { background: rgba(139, 92, 246, .06); }
 /* later in the cascade than .card .meta's grid, same specificity — flex wins here */
 .house-game .house-meta { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; margin-top: .4rem; }
 
+/* ---- master campaigns ---------------------------------------------------------- */
+
+.campaigns-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
+.campaigns-head h3 { margin: 0; }
+.campaign-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: .4rem 0 1rem; }
+.campaign-card { padding: 1rem; }
+.campaign-card-head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.campaign-card-head h4 { margin: 0; font-size: 1rem; }
+
+.status-pill {
+    font-size: .68rem; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+    border-radius: 999px; padding: .18rem .55rem; border: 1px solid var(--border);
+    white-space: nowrap;
+}
+.status-pill.status-active { color: var(--good); border-color: rgba(74, 222, 128, .4); background: rgba(74, 222, 128, .08); }
+.status-pill.status-retired { color: var(--muted); background: var(--panel-2); }
+
+.campaign-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .8rem; }
+.campaign-actions .btn { text-decoration: none; padding: .4rem .7rem; font-size: .82rem; }
+
+/* create form */
+.campaign-form { display: flex; flex-direction: column; gap: .9rem; margin-top: 1rem;
+    border-top: 1px dashed var(--border-bright); padding-top: 1rem; }
+.field { display: flex; flex-direction: column; gap: .35rem; color: var(--muted); font-size: .82rem; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
+.field-note { margin: 0; font-size: .74rem; color: var(--muted); line-height: 1.35; }
+.campaign-input {
+    background: var(--bg); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: .5rem .6rem; font-size: .9rem;
+}
+.campaign-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139, 92, 246, .25); }
+
+.tier-row-form { display: grid; grid-template-columns: 1.3fr .8fr 1.3fr auto; gap: .5rem; margin-bottom: .5rem; align-items: center; }
+.tier-row-form .tier-remove { padding: .3rem .6rem; font-size: .8rem; }
+
+.radio-group { display: flex; flex-direction: column; gap: .4rem; }
+.radio-row { display: flex; align-items: flex-start; gap: .5rem; color: var(--ink); font-size: .84rem; }
+.radio-row input { margin-top: .2rem; }
+
+.shop-checks { display: flex; flex-wrap: wrap; gap: .5rem .9rem; }
+.shop-check { display: inline-flex; align-items: center; gap: .35rem; color: var(--ink); font-size: .85rem;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: .3rem .7rem; }
+
+.rtp-preview {
+    background: var(--panel-2); border: 1px solid var(--border-bright); border-radius: 10px;
+    padding: .8rem 1rem; font-size: .85rem;
+}
+.preview-rtp b { color: var(--gold); font-size: 1.1rem; }
+.preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: .6rem; }
+.preview-grid > div { display: flex; flex-direction: column; }
+.preview-label { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .4px; }
+.preview-grid b { font-size: 1.15rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.preview-note { margin: .6rem 0 0; font-weight: 600; }
+.preview-note.good { color: var(--good); } .preview-note.bad { color: var(--bad); }
+.preview-errors { margin: .4rem 0 0; padding-left: 1.1rem; color: var(--bad); font-size: .8rem; }
+
+/* analytics detail */
+.analytics-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.analytics-head h3 { margin: 0; }
+.book-depletion { display: grid; grid-template-columns: 5rem auto 1fr auto; gap: .6rem; align-items: center; margin-bottom: .5rem; }
+.book-dep-id { font-family: monospace; font-size: .78rem; color: var(--muted); }
+.book-dep-stat { font-size: .78rem; color: var(--muted); white-space: nowrap; }
+.book-dep-stat b { color: var(--ink); }
+
+@media (max-width: 620px) {
+    .field-row { grid-template-columns: 1fr; }
+    .tier-row-form { grid-template-columns: 1fr 1fr; }
+    .book-depletion { grid-template-columns: 1fr 1fr; }
+}
+
 /* ---- toast & footer ----------------------------------------------------------- */
 
 .toast {
