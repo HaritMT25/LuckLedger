@@ -80,4 +80,19 @@ public class DealerEntity {
 
     public void setTier(DealerTier tier) { this.tier = tier; }
     public void setBooksDepleted(int booksDepleted) { this.booksDepleted = booksDepleted; }
+
+    /**
+     * Adds a game to this shop's stocked set (idempotent), so a newly created campaign's books allocated
+     * here are reachable. Replaces the JSONB list with a fresh mutable copy — the field may have been
+     * loaded as an immutable list — so the change is picked up on save.
+     *
+     * @param gameId the game to stock; never {@code null}
+     */
+    public void addStockedGame(UUID gameId) {
+        List<UUID> updated = new java.util.ArrayList<>(stockedGames);
+        if (!updated.contains(gameId)) {
+            updated.add(gameId);
+        }
+        this.stockedGames = updated;
+    }
 }

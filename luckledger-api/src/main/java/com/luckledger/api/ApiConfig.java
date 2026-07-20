@@ -18,6 +18,7 @@ import com.luckledger.domain.mechanic.MechanicType;
 import com.luckledger.domain.orchestration.GameConfig;
 import com.luckledger.domain.pool.BookProfile;
 import com.luckledger.domain.pool.PoolContract;
+import com.luckledger.domain.pool.PoolFactory;
 import com.luckledger.domain.pool.PrizeTier;
 import com.luckledger.generation.pipeline.GenerationPipeline;
 import com.luckledger.generation.theme.ThemeSkinningService;
@@ -62,6 +63,11 @@ public class ApiConfig {
     @Bean
     public PoolValidator poolValidator() {
         return new PoolValidator();
+    }
+
+    @Bean
+    public PoolFactory poolFactory(PoolValidator poolValidator) {
+        return new PoolFactory(poolValidator);
     }
 
     @Bean

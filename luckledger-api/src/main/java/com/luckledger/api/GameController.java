@@ -69,6 +69,8 @@ public class GameController {
         return new GameSummary(
                 game.getId(),
                 DealerController.gameName(game),
+                game.getName(),
+                game.getStatus().name(),
                 game.getMechanicType().name(),
                 game.getTicketPrice(),
                 game.getPayoutRatio(),
@@ -78,9 +80,15 @@ public class GameController {
                 game.isVerificationPassed());
     }
 
+    /**
+     * A game's headline economics. {@code gameName} is the always-present display name (derived from the
+     * mechanic); {@code name} is the operator-chosen campaign name (null for legacy games); {@code status}
+     * is the lifecycle state (ACTIVE/RETIRED).
+     */
     public record GameSummary(
-            UUID gameId, String gameName, String mechanic, BigDecimal ticketPrice, BigDecimal payoutRatio,
-            BigDecimal topPrize, int ticketCount, int dealerCount, boolean verificationPassed) {}
+            UUID gameId, String gameName, String name, String status, String mechanic, BigDecimal ticketPrice,
+            BigDecimal payoutRatio, BigDecimal topPrize, int ticketCount, int dealerCount,
+            boolean verificationPassed) {}
 
     public record VerificationDto(boolean passed, List<CheckDto> checks) {}
 

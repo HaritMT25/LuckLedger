@@ -13,6 +13,7 @@ import com.luckledger.api.persistence.TicketRepository;
 import com.luckledger.distribution.BookDepletedException;
 import com.luckledger.domain.ledger.Transaction;
 import com.luckledger.domain.ledger.TransactionType;
+import com.luckledger.domain.orchestration.GameStatus;
 import com.luckledger.domain.player.Player;
 import com.luckledger.domain.scratch.PurchaseResult;
 import com.luckledger.domain.scratch.TicketStatus;
@@ -90,6 +91,11 @@ public class PurchaseGateway {
 
         GameEntity game = games.findById(book.getGameId())
                 .orElseThrow(() -> new NoSuchElementException("no game with id " + book.getGameId()));
+        // A retired campaign is off the shelf: no new purchases. Reveal of already-sold tickets is
+        // untouched — this gate is only on the buy path. (409 CONFLICT via IllegalStateException.)
+        if (game.getStatus() == GameStatus.RETIRED) {
+            throw new IllegalStateException("game " + game.getId() + " is retired and not for sale");
+        }
         BigDecimal price = game.getTicketPrice();
 
         // Lock the drawn ticket SECOND (before the player, mirroring RevealGateway's ticket-then-player

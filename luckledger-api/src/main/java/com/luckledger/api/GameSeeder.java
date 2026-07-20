@@ -5,6 +5,7 @@ import com.luckledger.api.persistence.DealerRepository;
 import com.luckledger.api.persistence.GamePersistenceMapper;
 import com.luckledger.api.persistence.GamePersistenceMapper.PersistedGame;
 import com.luckledger.api.persistence.GameRepository;
+import com.luckledger.api.persistence.PoolContractDoc;
 import com.luckledger.api.persistence.TicketBookRepository;
 import com.luckledger.api.persistence.TicketRepository;
 import com.luckledger.cli.GameOrchestrator;
@@ -92,8 +93,10 @@ public class GameSeeder implements ApplicationRunner {
         List<DealerEntity> roster = List.of(luckyMart, sevenStar, goldenExpress, quickStop, moonlight, nightOwl);
         dealers.saveAll(roster);
 
-        seed(ApiConfig.celestialConfig(), celestialOrchestrator, celestialId, stockedBy(roster, celestialId));
-        seed(ApiConfig.demonConfig(), demonOrchestrator, demonId, stockedBy(roster, demonId));
+        seed(ApiConfig.celestialConfig(), celestialOrchestrator, celestialId, "Celestial Fortune",
+                stockedBy(roster, celestialId));
+        seed(ApiConfig.demonConfig(), demonOrchestrator, demonId, "Demon Seal",
+                stockedBy(roster, demonId));
     }
 
     /**
@@ -111,10 +114,15 @@ public class GameSeeder implements ApplicationRunner {
         return slots;
     }
 
-    private void seed(GameConfig config, GameOrchestrator orchestrator, UUID gameId, List<DealerEntity> stockingShops) {
+    private void seed(GameConfig config, GameOrchestrator orchestrator, UUID gameId, String name,
+            List<DealerEntity> stockingShops) {
         GameSetupResult setup = orchestrator.setup(config, dealerSlots(stockingShops));
+        // Stamp the demo game with its display name, ACTIVE status, and the exact pool contract it was
+        // built from (so a restock regenerates identical economics). The mode (REALISTIC) rides along
+        // via the config. Nothing else about the seed changes.
+        PoolContractDoc contract = PoolContractDoc.fromDomain(config.poolContract());
         PersistedGame persisted = GamePersistenceMapper.toPersisted(
-                gameId, config, setup, Instant.now(), GameSeeder::rotatedVisibility);
+                gameId, name, config, setup, Instant.now(), contract, GameSeeder::rotatedVisibility);
         games.save(persisted.game());
         books.saveAll(persisted.books());
         tickets.saveAll(persisted.tickets());

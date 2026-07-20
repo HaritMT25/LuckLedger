@@ -5,6 +5,7 @@ import com.luckledger.api.persistence.GameEntity;
 import com.luckledger.api.persistence.TicketBookEntity;
 import com.luckledger.api.persistence.TicketRepository.BookTicketStats;
 import com.luckledger.distribution.AllocationQuartile;
+import com.luckledger.domain.orchestration.GameStatus;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -92,7 +93,13 @@ public class DealerController {
         gameStore.dealer(dealerId); // 404 if the shop does not exist
         Map<UUID, GameEntity> gamesById = gameStore.games().stream()
                 .collect(Collectors.toMap(GameEntity::getId, g -> g));
-        List<TicketBookEntity> shopBooks = gameStore.booksForDealer(dealerId);
+        // A retired campaign's books are off the shelf: hide them from the shop's shopfront listing.
+        List<TicketBookEntity> shopBooks = gameStore.booksForDealer(dealerId).stream()
+                .filter(b -> {
+                    GameEntity game = gamesById.get(b.getGameId());
+                    return game != null && game.getStatus() != GameStatus.RETIRED;
+                })
+                .toList();
         Map<UUID, BookTicketStats> stats = gameStore.bookStats(
                 shopBooks.stream().map(TicketBookEntity::getId).toList());
         return shopBooks.stream()
