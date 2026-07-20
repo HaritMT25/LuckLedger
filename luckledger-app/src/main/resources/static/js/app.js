@@ -892,14 +892,28 @@ async function renderHouse() {
             const me = await Api.me().catch(() => null);
             if (me && me.authenticated) state.master = { username: me.username };
         }
-        const isMaster = !!state.master;
+        let isMaster = !!state.master;
 
-        // House overview is public; the player roster needs the master session, so only ask for it
-        // when signed in (and tolerate a lapsed session by degrading to the public view).
-        const [o, players] = await Promise.all([
+        // House overview is public; the player roster needs the master session. A 401/403 on the
+        // roster means the session lapsed since login — drop the stale master state and render the
+        // anonymous view (log-in card) instead of dead operator tools. Any other roster failure
+        // keeps the session and just omits the panel.
+        const [o, roster] = await Promise.all([
             Api.house(),
-            isMaster ? Api.masterPlayers().catch(() => null) : Promise.resolve(null),
+            isMaster ? Api.masterPlayers().then((p) => ({ players: p }), (e) => ({ error: e }))
+                     : Promise.resolve(null),
         ]);
+        let players = null;
+        if (roster) {
+            if (roster.error) {
+                if (roster.error.status === 401 || roster.error.status === 403) {
+                    state.master = null;
+                    isMaster = false;
+                }
+            } else {
+                players = roster.players;
+            }
+        }
         const body = document.getElementById('house-body');
         if (!body) return; // navigated away
         const t = o.totals;
