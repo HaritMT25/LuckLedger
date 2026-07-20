@@ -2,8 +2,9 @@
 
 ## Project
 Free-to-play scratch card simulator. Java 21 + Spring Boot 3.5.x + Maven.
-Education-first. No monetization. Auth: one master (operator) account via Spring Security
-sessions, gating /api/house/** + /api/master/**; players stay anonymous.
+Education-first. No monetization. Auth: /api/house/** is public read-only; /api/master/** is
+session-gated behind one master (operator) account (Spring Security sessions, fail-closed
+SecureRandom password — no default, WARN-logged once at startup). Players stay anonymous.
 
 ## Tech
 - Java 21, Spring Boot 3.5.x, Maven 3.9+
@@ -14,14 +15,16 @@ sessions, gating /api/house/** + /api/master/**; players stay anonymous.
 - JUnit 5 + AssertJ. No Lombok.
 
 ## Modules
-luckledger-domain         Pure Java — NO Spring
-luckledger-pool           PoolContract, PoolValidator, PoolFactory
-luckledger-mechanic       GridPopulator, WinEvaluator, GameMechanic impls
-luckledger-generation     Outcome, Shuffle, Pipeline, Verification, Theme
+luckledger-domain         Pure Java — NO Spring. Holds pool (PoolContract, PoolValidator,
+                          PoolFactory), mechanic types, generation, ledger, player, scratch domain
+luckledger-pool           Placeholder module (empty, .gitkeep only) — pool classes live in
+                          luckledger-domain under com.luckledger.domain.pool
+luckledger-mechanic       GridPopulator, WinEvaluator, GameMechanic impls, NearMissAnalyzer
+luckledger-generation     Pipeline, Verification, Theme skinning
 luckledger-distribution   BookPartitioner, DealerAllocator, DealerRegistry
-luckledger-player         Player, BankService, Ledger, Insights
-luckledger-scratch-flow   TicketPurchase, ScratchReveal
-luckledger-api            26 REST endpoints
+luckledger-player         BankService, LedgerService, Insights
+luckledger-scratch-flow   TicketPurchaseService, ScratchRevealService
+luckledger-api            38 REST endpoints (14 controllers) + JPA persistence
 luckledger-cli            Generation CLI
 luckledger-app            @SpringBootApplication + Flyway
 

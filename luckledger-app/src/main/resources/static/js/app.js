@@ -36,6 +36,8 @@ function toast(message, isError) {
     const el = document.getElementById('toast');
     el.textContent = message;
     el.className = 'toast' + (isError ? ' error' : '');
+    // Errors are assertive (role="alert"); ordinary notices are polite (role="status").
+    el.setAttribute('role', isError ? 'alert' : 'status');
     el.hidden = false;
     clearTimeout(toast._t);
     toast._t = setTimeout(() => { el.hidden = true; }, 3200);
@@ -95,13 +97,21 @@ function renderPlayerBar() {
         <span class="player-chip">${escapeHtml(p.displayName)}</span>
         <span class="player-chip balance${moved ? ` bump ${dir}` : ''}">Balance
             <strong>${money(p.coinBalance)}</strong> coins</span>
-        <button class="btn secondary" id="borrow-btn">Borrow 100</button>`;
+        <button class="btn secondary" id="borrow-btn">Borrow 100</button>
+        <button class="btn secondary" id="sound-btn" title="Toggle sound" aria-label="Toggle sound"
+            aria-pressed="${Sounds.enabled()}">${Sounds.enabled() ? '🔊' : '🔇'}</button>`;
     document.getElementById('borrow-btn').onclick = async () => {
         try {
             state.player = await Api.borrow(p.playerId, 100);
             renderPlayerBar();
             toast('Borrowed 100 free coins from the bank.');
         } catch (e) { toast(e.message, true); }
+    };
+    const soundBtn = document.getElementById('sound-btn');
+    if (soundBtn) soundBtn.onclick = () => {
+        const enabled = Sounds.toggle();
+        soundBtn.textContent = enabled ? '🔊' : '🔇';
+        soundBtn.setAttribute('aria-pressed', String(enabled));
     };
 }
 
@@ -714,9 +724,9 @@ async function renderScratch() {
                 <div id="reveal-layer" class="reveal-layer"></div>
                 <canvas id="scratch" class="scratch-canvas" width="360" height="640"></canvas>
                 <canvas id="fx-canvas" class="fx-canvas" width="360" height="640"></canvas>
-                <div id="banner" class="result-banner" hidden></div>
+                <div id="banner" class="result-banner" role="status" aria-live="polite" hidden></div>
             </div>
-            <p class="scratch-instructions" id="scratch-progress">Scratch each panel to uncover what this
+            <p class="scratch-instructions" id="scratch-progress" aria-live="polite">Scratch each panel to uncover what this
                 ticket was always going to be.</p>
             <div class="scratch-actions">
                 <button class="btn ghost" id="reveal-all">Reveal everything</button>
@@ -792,10 +802,11 @@ async function renderScratch() {
 
     // Particle layer: shavings off the pointer while scratching, a glint burst per cleared panel.
     const fx = createStageFx(document.getElementById('fx-canvas'));
-    canvas.addEventListener('scratchstroke', (e) => fx.shavings(e.detail.x, e.detail.y));
+    canvas.addEventListener('scratchstroke', (e) => { fx.shavings(e.detail.x, e.detail.y); Sounds.scratch(); });
 
     // Per-zone feedback: pop the uncovered tile and advance the progress line.
     canvas.addEventListener('zonereveal', (e) => {
+        Sounds.zone();
         const tile = revealLayer.querySelector(`[data-zone="${e.detail.zoneId}"]`);
         if (tile) tile.classList.add('revealed');
         const zone = zones.find((z) => z.id === e.detail.zoneId);
@@ -864,7 +875,7 @@ function showResult(outcome, won, detail, ticket) {
         ${detail ? `<div class="result-detail">${escapeHtml(detail)}</div>` : ''}
         <div class="result-edu" id="result-edu"></div>`;
     banner.hidden = false;
-    if (won) burstConfetti(document.getElementById('stage'));
+    if (won) { Sounds.win(); burstConfetti(document.getElementById('stage')); } else { Sounds.lose(); }
     const revealAllBtn = document.getElementById('reveal-all');
     if (revealAllBtn) revealAllBtn.hidden = true;
     const again = document.getElementById('buy-another');
