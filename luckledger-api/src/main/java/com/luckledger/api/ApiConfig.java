@@ -48,8 +48,10 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Wires the pure-domain services (which carry no Spring annotations) into Spring beans and assembles
- * the two pre-generated games' orchestrators. The state engine is entirely in-memory; there is no
- * datastore.
+ * the two seed games' orchestrators. Persistent state — players, games, books, tickets and the
+ * append-only ledger — lives in Postgres via JPA (see the {@code persistence} package and the
+ * Flyway migrations); the {@link com.luckledger.player.ledger.TransactionRecorder} bean here is the
+ * Postgres-backed {@code JpaTransactionRecorder}.
  */
 @Configuration
 public class ApiConfig {

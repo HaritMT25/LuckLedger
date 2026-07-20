@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_note": "Positions are fractions of image width/height (0..1), so they scale to any size. Circles use cx/cy/r (r is a fraction of WIDTH). Rects use x/y/w/h (top-left + size). 'scratch:true' zones get a metallic coating in the app; others (title/badge/decoration) are reference only. Refine with /tools/map-zones.html.",
+  "_note": "These zones are PRESENTATION GEOMETRY ONLY — they say WHERE on the ticket art each scratchable panel sits, not what it shows. The authoritative outcome is the mechanic grid served by the backend at reveal (predetermined + verified at generation); the frontend maps those grid values onto these zones under the coating. Positions are fractions of image width/height (0..1), so they scale to any size. Circles use cx/cy/r (r is a fraction of WIDTH). Rects use x/y/w/h (top-left + size). 'scratch:true' zones get a metallic coating in the app; others (title/badge/decoration) are reference only. ScratchZoneContractTest (luckledger-app) pins the scratch-zone counts and order to the mechanics — Celestial Fortune = 16 (4 win coins above 12 crystals), Demon Seal = 6 seals in SEAL_ZONE_ORDER — so this config cannot silently drift. Refine with /tools/map-zones.html.",
   "tickets": {
     "CELESTIAL_FORTUNE": {
       "image": "assets/tickets/celestial.png",
