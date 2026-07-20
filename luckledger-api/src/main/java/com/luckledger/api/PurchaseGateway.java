@@ -1,6 +1,5 @@
 package com.luckledger.api;
 
-import com.luckledger.api.persistence.DealerEntity;
 import com.luckledger.api.persistence.DealerRepository;
 import com.luckledger.api.persistence.GameEntity;
 import com.luckledger.api.persistence.GameRepository;
@@ -39,8 +38,11 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><strong>Lock order (writer rule): book/ticket first, player LAST.</strong> The book row is taken
  * under a pessimistic write lock at the very start, so the depleted-book check and the sale-cursor
  * advance run serialized — two concurrent buyers of the same book are ordered, never handed the same
- * slot. The player row is locked last. Every writer (purchase, reveal, borrow) obtains locks in this
- * same order to make deadlock impossible.
+ * slot. The drawn ticket row is then locked (with a sold-check) so the sale is also race-safe at the
+ * row level, and the player row is locked last. Every writer (purchase, reveal, borrow) obtains locks
+ * in this same order to make deadlock impossible. The dealer depletion counter is <em>not</em> part of
+ * the lock set: it is bumped with a single atomic in-place increment ({@code booksDepleted + 1}) rather
+ * than a read-modify-write, so it needs no lock and cannot lost-update across books of the same dealer.
  */
 @Service
 public class PurchaseGateway {
@@ -99,9 +101,18 @@ public class PurchaseGateway {
         PlayerMapper.applyTo(player, playerEntity);
         players.save(playerEntity);
 
-        TicketEntity ticket = tickets.findByBookIdAndPositionInBook(bookId, book.getNextIndex())
+        // Re-load the drawn ticket under a pessimistic write lock and assert it is unsold in the same
+        // transaction. This makes the sale race-safe at the row level independent of the book lock:
+        // SELECT FOR UPDATE + sold-check + write cannot interleave with another sale of this row.
+        UUID drawnTicketId = tickets.findByBookIdAndPositionInBook(bookId, book.getNextIndex())
+                .map(TicketEntity::getId)
                 .orElseThrow(() -> new NoSuchElementException(
                         "book " + bookId + " has no ticket at position " + book.getNextIndex()));
+        TicketEntity ticket = tickets.findByIdForUpdate(drawnTicketId)
+                .orElseThrow(() -> new NoSuchElementException("no ticket with id " + drawnTicketId));
+        if (ticket.getPlayerId() != null || ticket.getStatus() == TicketStatus.SOLD) {
+            throw new IllegalStateException("ticket " + drawnTicketId + " has already been sold");
+        }
         ticket.setStatus(TicketStatus.SOLD);
         ticket.setPlayerId(playerId);
         tickets.save(ticket);
@@ -109,10 +120,10 @@ public class PurchaseGateway {
         book.setNextIndex(book.getNextIndex() + 1);
         books.save(book);
         if (book.getNextIndex() >= book.getTotalTickets()) {
-            DealerEntity dealer = dealers.findById(dealerId)
-                    .orElseThrow(() -> new NoSuchElementException("no dealer with id " + dealerId));
-            dealer.setBooksDepleted(dealer.getBooksDepleted() + 1);
-            dealers.save(dealer);
+            // Atomic in-place increment: two purchases depleting two different books of the same dealer
+            // must not lost-update a read-modify-write of booksDepleted. No DealerEntity is loaded here,
+            // so nothing later clobbers the bulk update.
+            dealers.incrementBooksDepleted(dealerId);
         }
 
         recorder.record(new Transaction(

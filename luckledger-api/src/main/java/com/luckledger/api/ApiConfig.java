@@ -5,6 +5,7 @@ import com.luckledger.distribution.BookPartitioner;
 import com.luckledger.distribution.DealerAllocator;
 import com.luckledger.distribution.DealerRegistry;
 import com.luckledger.distribution.DealerTierResolver;
+import com.luckledger.domain.generation.NearMissMode;
 import com.luckledger.domain.generation.OutcomeGenerator;
 import com.luckledger.domain.generation.ShuffleService;
 import com.luckledger.domain.generation.theme.AssetRef;
@@ -171,7 +172,10 @@ public class ApiConfig {
                 .minPayout(BigDecimal.ZERO)
                 .bookProfile(BookProfile.BALANCED)
                 .build();
-        return new GameConfig(pool, MechanicType.CELESTIAL_FORTUNE, CELESTIAL_THEME_ID, 25, 4);
+        // REALISTIC: engineer near-misses into losers so the awareness feature is observable in the
+        // served games. RTP-neutral — only losing grids are rearranged, tier counts/payout unchanged.
+        return new GameConfig(
+                pool, MechanicType.CELESTIAL_FORTUNE, CELESTIAL_THEME_ID, 25, 4, NearMissMode.REALISTIC);
     }
 
     /**
@@ -193,7 +197,8 @@ public class ApiConfig {
                 .minPayout(BigDecimal.ZERO)
                 .bookProfile(BookProfile.BALANCED)
                 .build();
-        return new GameConfig(pool, MechanicType.DEMON_SEAL, DEMON_THEME_ID, 20, 5);
+        // REALISTIC: see celestialConfig — same RTP-neutral near-miss engineering for the served game.
+        return new GameConfig(pool, MechanicType.DEMON_SEAL, DEMON_THEME_ID, 20, 5, NearMissMode.REALISTIC);
     }
 
     private static ThemeRef theme(String id, String name, List<String> symbols) {
