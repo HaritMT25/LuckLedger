@@ -78,7 +78,9 @@ public class RestockService {
         GameSetupResult setup = orchestrator.setup(config, GameSeeder.dealerSlots(stockingShops));
         // Reuse the seeder's mapper with the EXISTING game id so the new books/tickets attach to this
         // game; the mapped game row itself is discarded — the original keeps its identity and history.
-        PersistedGame persisted = GamePersistenceMapper.toPersisted(gameId, config, setup, Instant.now());
+        // New books get the same rotated visibility tiers the seeder uses, for demo variety.
+        PersistedGame persisted = GamePersistenceMapper.toPersisted(
+                gameId, config, setup, Instant.now(), GameSeeder::rotatedVisibility);
         books.saveAll(persisted.books());
         tickets.saveAll(persisted.tickets());
 

@@ -52,6 +52,32 @@ public interface TicketRepository extends JpaRepository<TicketEntity, UUID> {
             """)
     List<GameTicketStats> aggregateByGame();
 
+    /**
+     * Per-book depletion economics for the book-metadata-visibility feature (DESIGN §3.12), grouped by
+     * book. {@code prizeFund} is the sum every ticket in the book was BUILT to pay (known at print time);
+     * {@code dispensed} is what its revealed tickets have actually paid out; {@code winsSoFar} counts the
+     * revealed winners. None of these change any still-sealed ticket's odds — they describe the past.
+     */
+    @Query("""
+            select t.bookId as bookId,
+                   coalesce(sum(t.prizeAmount), 0) as prizeFund,
+                   coalesce(sum(case when t.revealed = true then t.revealedPrize else 0 end), 0) as dispensed,
+                   coalesce(sum(case when t.revealed = true and t.revealedIsWinner = true
+                       then 1 else 0 end), 0) as winsSoFar
+            from TicketEntity t
+            where t.bookId in :bookIds
+            group by t.bookId
+            """)
+    List<BookTicketStats> aggregateByBook(@Param("bookIds") java.util.Collection<UUID> bookIds);
+
+    /** Projection for {@link #aggregateByBook(java.util.Collection)}. */
+    interface BookTicketStats {
+        UUID getBookId();
+        BigDecimal getPrizeFund();
+        BigDecimal getDispensed();
+        long getWinsSoFar();
+    }
+
     /** Bought-but-unscratched ticket counts per player, for the master's player oversight. */
     @Query("""
             select t.playerId as playerId, count(t) as pending

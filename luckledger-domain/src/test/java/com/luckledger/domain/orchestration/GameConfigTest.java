@@ -3,6 +3,8 @@ package com.luckledger.domain.orchestration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.luckledger.domain.generation.MetadataVisibility;
+import com.luckledger.domain.generation.NearMissMode;
 import com.luckledger.domain.mechanic.MechanicType;
 import com.luckledger.domain.pool.BookProfile;
 import com.luckledger.domain.pool.PoolContract;
@@ -46,6 +48,40 @@ class GameConfigTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new GameConfig(pool(), MechanicType.DEMON_SEAL, "demon", 10, 0))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void legacyConstructorDefaultsVisibilityToPartial() {
+        GameConfig config = new GameConfig(pool(), MechanicType.DEMON_SEAL, "demon", 10, 4);
+
+        assertThat(config.bookMetadataVisibility()).isEqualTo(MetadataVisibility.PARTIAL);
+        assertThat(config.nearMissMode()).isEqualTo(NearMissMode.CLEAN);
+    }
+
+    @Test
+    void nearMissConstructorDefaultsVisibilityToPartial() {
+        GameConfig config = new GameConfig(
+                pool(), MechanicType.DEMON_SEAL, "demon", 10, 4, NearMissMode.REALISTIC);
+
+        assertThat(config.nearMissMode()).isEqualTo(NearMissMode.REALISTIC);
+        assertThat(config.bookMetadataVisibility()).isEqualTo(MetadataVisibility.PARTIAL);
+    }
+
+    @Test
+    void carriesAnExplicitVisibility() {
+        GameConfig config = new GameConfig(
+                pool(), MechanicType.DEMON_SEAL, "demon", 10, 4,
+                NearMissMode.REALISTIC, MetadataVisibility.FULL);
+
+        assertThat(config.bookMetadataVisibility()).isEqualTo(MetadataVisibility.FULL);
+    }
+
+    @Test
+    void nullVisibilityIsRejected() {
+        assertThatThrownBy(() -> new GameConfig(
+                        pool(), MechanicType.DEMON_SEAL, "demon", 10, 4,
+                        NearMissMode.CLEAN, null))
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test

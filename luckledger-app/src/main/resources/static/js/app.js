@@ -326,11 +326,15 @@ async function renderDealers() {
         </section>
         <div class="section-title"><h2>Shops</h2>
             <span class="hint">NPC storefronts, each run by an owner. Tap a shop to see what it stocks.</span></div>
-        <div id="grid">${skeletonCards(6)}</div>`;
+        <div id="grid">${skeletonCards(6)}</div>
+        <div class="section-title"><h2>Shop leaderboard</h2>
+            <span class="hint">Ranked by books sold out — throughput, not luck.</span></div>
+        <div id="leaderboard" class="leaderboard">${skeletonCards(1)}</div>`;
     loadGames().then((games) => {
         const strip = document.getElementById('game-strip');
         if (strip) strip.innerHTML = games.map(gameStripCard).join('');
     }).catch(() => { /* hero strip is decorative */ });
+    renderLeaderboard();
     try {
         const dealers = await Api.dealers();
         const grid = document.getElementById('grid');
@@ -365,6 +369,41 @@ async function renderDealers() {
             });
         });
     } catch (e) { view.querySelector('#grid').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`; }
+}
+
+/** A medal for the top three ranks, else the bare number. */
+function rankMedal(rank) {
+    return { 1: '🥇', 2: '🥈', 3: '🥉' }[rank] || `#${rank}`;
+}
+
+/** The shop leaderboard panel: ranked list with medals for the top three, plus the flywheel debunk. */
+async function renderLeaderboard() {
+    const panel = document.getElementById('leaderboard');
+    if (!panel) return;
+    try {
+        const rankings = await Api.rankings();
+        if (!document.getElementById('leaderboard')) return; // navigated away
+        if (!rankings.length) { panel.innerHTML = `<p class="empty">No shops seeded.</p>`; return; }
+        panel.innerHTML = `
+            <ol class="rank-list">
+                ${rankings.map((r) => `
+                    <li class="rank-row${r.rank <= 3 ? ' rank-top' : ''}">
+                        <span class="rank-medal">${rankMedal(r.rank)}</span>
+                        <span class="rank-shop">
+                            <b>${escapeHtml(r.shopName)}</b>
+                            <small>${escapeHtml(r.ownerName)}</small>
+                        </span>
+                        <span class="tier-badge t${(r.tier || '').slice(-1)}">${tierLabel(r.tier)} · ${escapeHtml(r.quartile)}</span>
+                        <span class="rank-stat">Sold out <b>${r.booksDepleted}</b></span>
+                        <span class="rank-stat">Selling <b>${r.activeBooks}</b></span>
+                    </li>`).join('')}
+            </ol>
+            <p class="hint debunk">Every book of a game has identical per-ticket odds. A "hot shop"
+                isn't luckier — it just sells more tickets, so it lands more (and bigger) winners by sheer
+                volume. Rank measures throughput, not luck.</p>`;
+    } catch (e) {
+        panel.innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+    }
 }
 
 /** A single shop's storefront: its books grouped by game, each buyable, with the price up front. */
@@ -416,6 +455,41 @@ async function renderDealerBooks(dealerId) {
     }
 }
 
+/* How a book's metadata-visibility tier renders: an honest badge plus a one-line reminder that seeing
+   the roll's history changes nothing about the sealed ticket you're about to buy. */
+const VISIBILITY_BADGE = {
+    NONE: { cls: 'vis-none', label: '🙈 hidden roll' },
+    PARTIAL: { cls: 'vis-partial', label: '🔍 partial' },
+    FULL: { cls: 'vis-full', label: '📖 open book' },
+};
+
+/** The visibility panel for a book: badge, the depletion facts the tier permits, and an education hint. */
+function bookVisibility(b) {
+    const badge = VISIBILITY_BADGE[b.visibility];
+    if (!badge) return '';
+    let facts = '';
+    if (b.percentDispensed != null) {
+        facts += `<span>Roll dispensed <b>${Math.round(Number(b.percentDispensed))}%</b></span>`;
+    }
+    if (b.estimatedRemainingValue != null) {
+        facts += `<span>Prizes left (est.) <b>${money(b.estimatedRemainingValue)}</b></span>`;
+    }
+    if (b.winFrequencySoFar != null) {
+        facts += `<span>Winners revealed <b>${b.winFrequencySoFar}</b></span>`;
+    }
+    // The debunk: reading the roll is reading the PAST. The pool was fixed at print time, so a sealed
+    // ticket's odds are the same whether the roll is hidden or wide open.
+    const hint = b.visibility === 'NONE'
+        ? 'This roll hides its state — just like a real scratch card. You can\'t "read" it.'
+        : 'Reading the roll shows only what\'s already happened. Your sealed ticket\'s odds were fixed at print time — a transparent roll doesn\'t change them.';
+    return `
+        <div class="book-vis">
+            <span class="vis-badge ${badge.cls}">${badge.label}</span>
+            ${facts ? `<div class="vis-facts">${facts}</div>` : ''}
+            <p class="vis-hint">${hint}</p>
+        </div>`;
+}
+
 /** One buyable book: ticket art, price up front, a stock bar instead of bare counts. */
 function bookCard(b, i) {
     const soldOut = !b.ticketsRemaining;
@@ -433,6 +507,7 @@ function bookCard(b, i) {
                 <div class="stock-fill" style="width:${pct}%"></div>
             </div>
             <p class="stock-label">${soldOut ? 'Sold out' : `${b.ticketsRemaining} of ${b.totalTickets} tickets left`}</p>
+            ${bookVisibility(b)}
             <button class="btn block" data-book="${b.bookId}" data-mechanic="${escapeHtml(b.mechanic || '')}"
                 ${soldOut ? 'disabled' : ''}>
                 ${soldOut ? 'Sold out' : `Buy a ticket — ${money(b.ticketPrice)} coins`}</button>
