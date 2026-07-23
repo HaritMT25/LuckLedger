@@ -137,6 +137,7 @@ public class PurchaseGateway {
                 UUID.randomUUID(), playerId, TransactionType.SPEND, price, dealerId, bookId, ticket.getId(),
                 Instant.now()));
 
-        return new PurchaseResult(ticket.getId(), TicketStatus.SOLD, price, dealerId, bookId);
+        return new PurchaseResult(
+                ticket.getId(), TicketStatus.SOLD, price, dealerId, bookId, ticket.getGridCommitment());
     }
 }

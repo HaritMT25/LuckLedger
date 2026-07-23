@@ -78,7 +78,9 @@ public final class TicketPurchaseService {
                 Instant.now());
         transactionRecorder.record(spend);
 
+        // The in-memory scratch-flow predates persistence-side commit-reveal; no commitment is stamped
+        // on these tickets, so it is null here. The persisted purchase path supplies the real hash.
         return new PurchaseResult(
-                ticket.ticketId(), TicketStatus.SOLD, ticketPrice, dealer.dealerId(), book.bookId());
+                ticket.ticketId(), TicketStatus.SOLD, ticketPrice, dealer.dealerId(), book.bookId(), null);
     }
 }

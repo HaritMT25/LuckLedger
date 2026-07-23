@@ -134,6 +134,10 @@ public final class GamePersistenceMapper {
             List<TicketCard> cards = book.tickets();
             for (int position = 0; position < cards.size(); position++) {
                 TicketCard card = cards.get(position);
+                GridCodec.GridDto grid = GridCodec.toDto(card.layout().grid());
+                // Commit-reveal proof stamped at generation for EVERY ticket: a random salt and the
+                // SHA-256 commitment over this exact grid. The salt is stored but withheld until reveal.
+                GridCommitment commitment = GridCommitment.forGrid(grid);
                 ticketEntities.add(new TicketEntity(
                         card.ticketId(),
                         book.bookId(),
@@ -143,8 +147,10 @@ public final class GamePersistenceMapper {
                         card.layout().prizeAmount(),
                         position,
                         TicketStatus.AVAILABLE,
-                        GridCodec.toDto(card.layout().grid()),
-                        GridCodec.toDto(card.skinnedGrid())));
+                        grid,
+                        GridCodec.toDto(card.skinnedGrid()),
+                        commitment.commitment(),
+                        commitment.salt()));
             }
         }
 

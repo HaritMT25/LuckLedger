@@ -62,9 +62,16 @@ public class RevealGateway {
      * the player's real symbols under the scratch coating), and the underlying mechanic {@code grid}
      * (so the reveal narrative can be derived from it). Both grids were verified at generation time;
      * serving them after reveal leaks nothing about unsold tickets.
+     *
+     * <p>Reveal is where the commit-reveal proof is completed: it carries both the public
+     * {@code gridCommitment} <em>and</em> the previously-secret {@code commitmentSalt}, so the client
+     * can re-hash the now-visible grid with the salt and confirm it equals the commitment fixed at
+     * generation. Both are {@code null} for legacy tickets. The salt is disclosed here — and only here —
+     * because the outcome is now public anyway.
      */
     public record RevealOutcome(UUID ticketId, UUID gameId, MechanicType mechanicType, boolean winner,
-            BigDecimal prizeAmount, GridCodec.ThemedGridDto skinnedGrid, GridCodec.GridDto grid) {}
+            BigDecimal prizeAmount, GridCodec.ThemedGridDto skinnedGrid, GridCodec.GridDto grid,
+            String gridCommitment, String commitmentSalt) {}
 
     /**
      * Reveals a ticket, crediting {@code playerId} and recording a WIN if it wins. Idempotent per ticket.
@@ -94,7 +101,8 @@ public class RevealGateway {
             return new RevealOutcome(
                     ticketId, ticket.getGameId(), ticket.getMechanicType(),
                     Boolean.TRUE.equals(ticket.getRevealedIsWinner()), ticket.getRevealedPrize(),
-                    ticket.getSkinnedGrid(), ticket.getGrid());
+                    ticket.getSkinnedGrid(), ticket.getGrid(),
+                    ticket.getGridCommitment(), ticket.getCommitmentSalt());
         }
 
         BigDecimal prize = ticket.getPrizeAmount();
@@ -124,6 +132,7 @@ public class RevealGateway {
         tickets.save(ticket);
         return new RevealOutcome(
                 ticketId, ticket.getGameId(), ticket.getMechanicType(), winner, prize,
-                ticket.getSkinnedGrid(), ticket.getGrid());
+                ticket.getSkinnedGrid(), ticket.getGrid(),
+                ticket.getGridCommitment(), ticket.getCommitmentSalt());
     }
 }

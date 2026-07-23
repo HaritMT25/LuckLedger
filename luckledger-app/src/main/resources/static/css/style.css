@@ -448,6 +448,13 @@ body {
 .result-edu { margin-top: .35rem; font-size: .78rem; color: var(--gold); font-style: italic; }
 .result-edu:empty { display: none; }
 .scratch-instructions { color: var(--muted); font-size: .9rem; text-align: center; margin: 0; }
+.commitment-proof { text-align: center; margin: .1rem 0; }
+.commitment-proof:empty { display: none; }
+.commitment-line { margin: 0; font-size: .78rem; font-family: ui-monospace, monospace; color: var(--muted); cursor: help; }
+.commitment-note { margin: .1rem 0 0; font-size: .72rem; color: var(--muted); font-style: italic; }
+.commitment-verdict { margin: .3rem 0 0; font-size: .8rem; font-weight: 600; }
+.commitment-verdict.ok { color: var(--good); }
+.commitment-verdict.bad { color: var(--bad); }
 .scratch-actions { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
 .scratch-actions a.btn { text-decoration: none; display: inline-block; }
 
