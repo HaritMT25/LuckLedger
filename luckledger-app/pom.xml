@@ -21,6 +21,12 @@
             <version>${project.version}</version>
         </dependency>
 
+        <!-- Kubernetes-style liveness/readiness + health/info probes (only health,info exposed). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- Local dev: `mvn spring-boot:run` auto-starts the Postgres in compose.yaml.
              Skipped during tests (spring.docker.compose.skip.in-tests defaults to true). -->
         <dependency>
