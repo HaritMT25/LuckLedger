@@ -1,0 +1,32 @@
+# Keep the Docker build context lean. The Maven build only needs the module
+# pom.xml files and src/ trees — everything below is either huge, VCS/tooling
+# state, or generated output that the multi-stage build reproduces itself.
+
+# 141MB of Photoshop art sources — runtime art is baked into
+# luckledger-app/src/main/resources/static/assets, not these.
+tickets/
+*.psd
+
+# Version control and agent/tooling state
+.git/
+.gitignore
+.claude/
+.beads/
+.dolt/
+.github/
+.idea/
+*.iml
+.mcp.json
+
+# Node-based e2e harness — not part of the JVM build
+e2e/node_modules/
+e2e/shots/
+
+# Build output — the builder stage regenerates this from source
+**/target/
+
+# Docs and helper scripts not needed to compile/run
+*.md
+!README.md
+setup-staff-engineer.sh
+fetch-skills.sh
