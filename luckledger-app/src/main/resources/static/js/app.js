@@ -1039,7 +1039,9 @@ async function renderLedger() {
             ${curveSection(curve)}
             ${dealerComparisonSection(dealerCmp)}
             ${insightsSection(insights)}
-            <h3>Every transaction</h3>
+            <div class="section-title"><h3>Every transaction</h3>
+                <a class="hint download-csv" href="/api/ledger/${pid}/transactions.csv">⬇ Download CSV</a></div>
+            <p class="hint">Your whole history, yours to keep — open it in any spreadsheet.</p>
             ${txns.length ? txnTable(txns.slice(0, 25)) : '<p class="empty">No transactions yet — borrow and play.</p>'}`;
     } catch (e) {
         document.getElementById('ledger-body').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;

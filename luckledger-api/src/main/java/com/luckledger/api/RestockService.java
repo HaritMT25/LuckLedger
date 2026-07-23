@@ -33,6 +33,18 @@ import org.springframework.transaction.annotation.Transactional;
  * <em>retune</em> a game's economics through restock; retuning means retiring and creating a new
  * campaign. Legacy games with no stored contract fall back to the {@link ApiConfig} seed statics. A
  * retired game cannot be restocked (409).
+ *
+ * <p><strong>Concurrency.</strong> Restock takes a pessimistic write lock on the game row as its very
+ * first step (see {@link GameRepository#findByIdForUpdate}) and holds it for the whole
+ * generate-and-persist transaction, so two restocks of the same game serialize: the second waits for
+ * the first to commit, then reads the already-grown totals and adds its own batch on top. Without this
+ * both calls would read the same starting totals and the losing {@code recordRestock} write would
+ * clobber the other's increment, drifting {@code book_count}/{@code total_tickets} below the rows
+ * actually persisted. <em>Lock ordering:</em> restock is the only writer that locks a game row and it
+ * acquires no book/ticket/player row locks (it only inserts brand-new book/ticket rows and updates the
+ * already-locked game row); purchase/reveal/borrow never lock game rows. The two lock sets are disjoint,
+ * so restock's game lock cannot cross-order with the book → player lock chain and no deadlock cycle can
+ * form.
  */
 @Service
 public class RestockService {
@@ -61,7 +73,10 @@ public class RestockService {
 
     @Transactional
     public RestockResult restock(UUID gameId) {
-        GameEntity game = gameStore.game(gameId); // 404 if unknown
+        // Serialize restock-vs-restock on this game: take the game row's write lock BEFORE any
+        // generation or persistence work, and hold it for the whole transaction (see class javadoc).
+        GameEntity game = games.findByIdForUpdate(gameId) // 404 if unknown
+                .orElseThrow(() -> new java.util.NoSuchElementException("no game with id " + gameId));
 
         // A retired campaign is off the shelf: it cannot be restocked (409 CONFLICT).
         if (game.getStatus() == GameStatus.RETIRED) {
