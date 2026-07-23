@@ -39,10 +39,14 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Build modules
+        # Install the reactor first: a fresh runner's ~/.m2 has no luckledger artifacts, so a
+        # plain -pl run cannot resolve sibling modules. (-am with spring-boot:run would instead
+        # execute the run goal on every module, and the parent has no main class.)
+        run: mvn -B -DskipTests install
+
       - name: Start application
-        # -am builds the sibling modules in the same reactor: a fresh runner's ~/.m2 has no
-        # luckledger artifacts, so plain -pl cannot resolve them.
-        run: mvn -B -am -pl luckledger-app spring-boot:run > app.log 2>&1 &
+        run: mvn -B -pl luckledger-app spring-boot:run > app.log 2>&1 &
 
       - name: Wait for /api/health
         run: |
