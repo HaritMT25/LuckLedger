@@ -27,8 +27,12 @@ class LedgerControllerTest {
         record(recorder, TransactionType.BORROW, "100");
         record(recorder, TransactionType.SPEND, "5");
         record(recorder, TransactionType.WIN, "25");
+        // No dealer rows exist in this standalone setup; the name-enrichment path sees an empty
+        // comparison map, so a default mock (findById -> Optional.empty) is all the controller needs.
         mockMvc = MockMvcBuilders.standaloneSetup(
-                        new LedgerController(new ApiConfig().ledgerService(recorder), recorder))
+                        new LedgerController(new ApiConfig().ledgerService(recorder), recorder,
+                                org.mockito.Mockito.mock(
+                                        com.luckledger.api.persistence.DealerRepository.class)))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }

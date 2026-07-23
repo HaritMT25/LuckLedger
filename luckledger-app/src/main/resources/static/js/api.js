@@ -69,6 +69,7 @@ const Api = (() => {
         rankings: () => request('GET', '/dealers/rankings'),
         dealer: (id) => request('GET', `/dealers/${id}`),
         dealerBooks: (id) => request('GET', `/dealers/${id}/books`),
+        book: (id) => request('GET', `/books/${id}`),
         games: () => request('GET', '/games'),
         nearMisses: (gameId) => request('GET', `/games/${gameId}/near-misses`),
         mechanicDetail: (type) => request('GET', `/mechanics/${type}`),

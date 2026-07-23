@@ -1012,7 +1012,7 @@ async function renderLedger() {
         const pid = state.player.playerId;
         const [p, txns, insights, curve, dealerCmp, games] = await Promise.all([
             Api.getPlayer(pid),
-            Api.transactions(pid, 25),
+            Api.transactions(pid, 200),
             Api.insights(pid).catch(() => []),
             Api.curve(pid).catch(() => []),
             Api.dealerComparison(pid).catch(() => ({})),
@@ -1024,7 +1024,7 @@ async function renderLedger() {
         const won = Number(p.totalWon);
         const net = won - spent;
         const personalRtp = spent > 0 ? `${Math.round((won / spent) * 100)}%` : '—';
-        const designedRtp = designedRtpFraction(games); // fraction (e.g. 0.65), or null when unknown
+        const designedRtp = await designedRtpFraction(txns, games); // fraction, or null when unknown
         const body = document.getElementById('ledger-body');
         if (!body) return;
         body.innerHTML = `
@@ -1040,19 +1040,41 @@ async function renderLedger() {
             ${dealerComparisonSection(dealerCmp)}
             ${insightsSection(insights)}
             <h3>Every transaction</h3>
-            ${txns.length ? txnTable(txns) : '<p class="empty">No transactions yet — borrow and play.</p>'}`;
+            ${txns.length ? txnTable(txns.slice(0, 25)) : '<p class="empty">No transactions yet — borrow and play.</p>'}`;
     } catch (e) {
         document.getElementById('ledger-body').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
     }
 }
 
-/** Average designed payout ratio across the seeded games, as a fraction; null when none are known. */
-function designedRtpFraction(games) {
-    const ratios = (games || [])
-        .map((g) => Number(g.payoutRatio))
-        .filter((r) => Number.isFinite(r) && r > 0);
-    if (!ratios.length) return null;
-    return ratios.reduce((a, b) => a + b, 0) / ratios.length;
+/**
+ * Designed payout ratio for THIS player's chart, as a fraction (null when nothing is known).
+ * Weighted by the player's own spend per game — a flat average across every game in the catalogue
+ * would let an unplayed campaign drag the "designed" line away from the games the player actually
+ * bought into. Falls back to the plain catalogue average when the player has no attributable spend.
+ */
+async function designedRtpFraction(txns, games) {
+    const ratioByGame = new Map((games || [])
+        .filter((g) => Number.isFinite(Number(g.payoutRatio)) && Number(g.payoutRatio) > 0)
+        .map((g) => [g.gameId, Number(g.payoutRatio)]));
+    const spendByBook = new Map();
+    (txns || []).forEach((t) => {
+        if (t.type !== 'SPEND' || !t.bookId) return;
+        spendByBook.set(t.bookId, (spendByBook.get(t.bookId) || 0) + Number(t.amount));
+    });
+    const books = await Promise.all(
+        [...spendByBook.keys()].map((id) => Api.book(id).catch(() => null)));
+    let weighted = 0;
+    let weight = 0;
+    books.filter(Boolean).forEach((b) => {
+        const ratio = ratioByGame.get(b.gameId);
+        if (ratio === undefined) return;
+        const spend = spendByBook.get(b.bookId) || 0;
+        weighted += ratio * spend;
+        weight += spend;
+    });
+    if (weight > 0) return weighted / weight;
+    const all = [...ratioByGame.values()];
+    return all.length ? all.reduce((a, b) => a + b, 0) / all.length : null;
 }
 
 /* The lesson chart: the player's own cumulative RTP (won ÷ spent after each ticket) walking toward the

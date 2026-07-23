@@ -7,8 +7,11 @@ import com.luckledger.domain.ledger.Insight;
 import com.luckledger.domain.ledger.LedgerSnapshot;
 import com.luckledger.domain.ledger.Transaction;
 import com.luckledger.domain.ledger.TransactionType;
+import com.luckledger.api.persistence.DealerEntity;
+import com.luckledger.api.persistence.DealerRepository;
 import com.luckledger.player.ledger.LedgerService;
 import com.luckledger.player.ledger.TransactionRecorder;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -30,10 +33,13 @@ public class LedgerController {
 
     private final LedgerService ledgerService;
     private final TransactionRecorder transactionRecorder;
+    private final DealerRepository dealers;
 
-    public LedgerController(LedgerService ledgerService, TransactionRecorder transactionRecorder) {
+    public LedgerController(LedgerService ledgerService, TransactionRecorder transactionRecorder,
+            DealerRepository dealers) {
         this.ledgerService = ledgerService;
         this.transactionRecorder = transactionRecorder;
+        this.dealers = dealers;
     }
 
     @GetMapping
@@ -62,7 +68,16 @@ public class LedgerController {
 
     @GetMapping("/dealer-comparison")
     public Map<UUID, DealerStats> dealerComparison(@PathVariable UUID playerId) {
-        return ledgerService.getDealerComparison(playerId);
+        // LedgerService sees only the ledger, so it names each dealer by its id; swap in the real
+        // shop name here where the dealer registry is available.
+        Map<UUID, DealerStats> named = new LinkedHashMap<>();
+        ledgerService.getDealerComparison(playerId).forEach((id, stats) -> named.put(id,
+                dealers.findById(id)
+                        .map(DealerEntity::getShopName)
+                        .map(name -> new DealerStats(stats.dealerId(), name, stats.ticketsBought(),
+                                stats.totalSpent(), stats.totalWon(), stats.returnRate()))
+                        .orElse(stats)));
+        return named;
     }
 
     @GetMapping("/curve")
