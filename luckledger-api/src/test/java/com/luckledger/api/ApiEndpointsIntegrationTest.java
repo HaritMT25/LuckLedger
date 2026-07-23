@@ -27,9 +27,15 @@ import com.luckledger.domain.generation.MetadataVisibility;
 import com.luckledger.domain.mechanic.MechanicType;
 import com.luckledger.domain.scratch.TicketStatus;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -734,5 +740,121 @@ class ApiEndpointsIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"playerId\":\"" + fundedPlayer() + "\"}"))
                 .andExpect(status().isNotFound());
+    }
+
+    // --- commit-reveal proof (V008) ------------------------------------------
+
+    @Test
+    void purchaseResponseCarriesTheGridCommitment() throws Exception {
+        String purchased = mockMvc.perform(post("/api/books/" + bookId + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"" + fundedPlayer() + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gridCommitment").isString())
+                .andReturn().getResponse().getContentAsString();
+        String commitment = JsonPath.read(purchased, "$.gridCommitment");
+        assertThat(commitment).matches("[0-9a-f]{64}");
+    }
+
+    @Test
+    void maskedTicketExposesTheCommitmentButNeverTheSalt() throws Exception {
+        // SECURITY INVARIANT: pre-reveal, the commitment is public but the salt must NOT appear anywhere
+        // in the serialized JSON — a leaked salt would let a client brute-force the grid before scratching.
+        String masked = mockMvc.perform(get("/api/tickets/" + firstTicketId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revealed").value(false))
+                .andExpect(jsonPath("$.gridCommitment").isString())
+                .andExpect(jsonPath("$.commitmentSalt").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+
+        // Belt-and-braces on the RAW JSON: the actual secret salt string must not appear anywhere in the
+        // body. (Jackson still emits the key as "commitmentSalt":null — a null is not a leak; the salt
+        // VALUE is what must never escape pre-reveal.)
+        String salt = tickets.findById(firstTicketId).orElseThrow().getCommitmentSalt();
+        assertThat(salt).matches("[0-9a-f]{32}");
+        assertThat(masked).contains("\"commitmentSalt\":null");
+        assertThat(masked).doesNotContain(salt);
+    }
+
+    @Test
+    void revealDisclosesTheSaltAndTheProofRecomputesToTheCommitment() throws Exception {
+        UUID playerId = fundedPlayer();
+        String body = "{\"playerId\":\"" + playerId + "\"}";
+        String purchased = mockMvc.perform(post("/api/books/" + bookId + "/purchase")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticketId = JsonPath.read(purchased, "$.ticketId");
+
+        String revealed = mockMvc.perform(post("/api/tickets/" + ticketId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gridCommitment").isString())
+                .andExpect(jsonPath("$.commitmentSalt").isString())
+                .andReturn().getResponse().getContentAsString();
+
+        String commitment = JsonPath.read(revealed, "$.gridCommitment");
+        String salt = JsonPath.read(revealed, "$.commitmentSalt");
+        assertThat(commitment).matches("[0-9a-f]{64}");
+        assertThat(salt).matches("[0-9a-f]{32}");
+
+        // Recompute the hash from the RETURNED grid + salt, exactly as the browser does: apply the
+        // mirrored canonical encoding to the themed grid's abstractSymbols and SHA-256 it.
+        assertThat(recomputeCommitmentFromRevealJson(revealed, salt)).isEqualTo(commitment);
+    }
+
+    @Test
+    void legacyTicketWithoutCommitmentRevealsWithoutNpe() throws Exception {
+        // A ticket generated before V008 has null commitment/salt. Buying and revealing it must not NPE;
+        // the response simply omits the salt and carries a null commitment.
+        TicketEntity template = tickets.findByBookIdOrderByPositionInBookAsc(bookId).get(0);
+        UUID legacyId = UUID.randomUUID();
+        UUID playerId = fundedPlayer();
+        // The 10-arg constructor leaves gridCommitment/commitmentSalt null — the legacy row shape.
+        TicketEntity legacy = new TicketEntity(
+                legacyId, bookId, gameId, UUID.randomUUID(), MechanicType.DEMON_SEAL,
+                BigDecimal.ZERO, null, TicketStatus.SOLD, template.getGrid(), template.getSkinnedGrid());
+        legacy.setPlayerId(playerId);
+        tickets.save(legacy);
+
+        assertThat(tickets.findById(legacyId).orElseThrow().getGridCommitment()).isNull();
+
+        mockMvc.perform(get("/api/tickets/" + legacyId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gridCommitment").doesNotExist())
+                .andExpect(jsonPath("$.commitmentSalt").doesNotExist());
+
+        mockMvc.perform(post("/api/tickets/" + legacyId + "/reveal")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"" + playerId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revealed").value(true))
+                .andExpect(jsonPath("$.gridCommitment").doesNotExist())
+                .andExpect(jsonPath("$.commitmentSalt").doesNotExist());
+    }
+
+    /**
+     * Independently recomputes a ticket's commitment from a reveal response's themed grid JSON + salt,
+     * mirroring GridCommitment.java's canonical encoding byte-for-byte:
+     * {@code salt + "|" + rows + "x" + cols + "|" + symbols.join(",")}, symbols being each cell's
+     * {@code abstractSymbol} (== the mechanic symbol the backend hashed) in row-major order.
+     */
+    private static String recomputeCommitmentFromRevealJson(String revealJson, String salt) {
+        int dimension = JsonPath.read(revealJson, "$.grid.dimension");
+        List<Map<String, Object>> cells = JsonPath.read(revealJson, "$.grid.cells");
+        String symbols = cells.stream()
+                .sorted(Comparator
+                        .<Map<String, Object>>comparingInt(c -> (Integer) c.get("row"))
+                        .thenComparingInt(c -> (Integer) c.get("col")))
+                .map(c -> (String) c.get("abstractSymbol"))
+                .collect(Collectors.joining(","));
+        String canonical = salt + "|" + dimension + "x" + dimension + "|" + symbols;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

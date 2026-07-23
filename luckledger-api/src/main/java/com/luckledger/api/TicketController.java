@@ -95,14 +95,24 @@ public class TicketController {
      * the coating. The {@code narrative} is a read-only, education-layer explanation of the outcome;
      * it is null before reveal and null if the sacred-payout guard tripped, and it never affects the
      * prize (that always follows the stored amount).
+     *
+     * <p><strong>Commit-reveal proof.</strong> {@code gridCommitment} (the public SHA-256 of the grid)
+     * is present in <em>both</em> the masked and revealed views — the player sees the outcome was fixed
+     * before purchase. {@code commitmentSalt} is the secret that would let the commitment be verified;
+     * it is <strong>absent (null) on the masked view</strong> and only supplied once revealed, otherwise
+     * a client could brute-force the small grid space from the commitment and learn the outcome early.
+     * Both are null for legacy tickets.
      */
     public record TicketView(
             UUID ticketId, UUID gameId, String mechanic, boolean revealed, Boolean isWinner,
-            BigDecimal prizeAmount, GridCodec.ThemedGridDto grid, OutcomeNarrative narrative) {
+            BigDecimal prizeAmount, GridCodec.ThemedGridDto grid, OutcomeNarrative narrative,
+            String gridCommitment, String commitmentSalt) {
 
         static TicketView masked(TicketEntity ticket) {
+            // gridCommitment present, commitmentSalt DELIBERATELY null: the salt must not leak pre-reveal.
             return new TicketView(
-                    ticket.getId(), ticket.getGameId(), ticket.getMechanicType().name(), false, null, null, null, null);
+                    ticket.getId(), ticket.getGameId(), ticket.getMechanicType().name(), false, null, null,
+                    null, null, ticket.getGridCommitment(), null);
         }
 
         static TicketView revealed(TicketEntity ticket, OutcomeNarrative narrative) {
@@ -114,7 +124,9 @@ public class TicketController {
                     ticket.getRevealedIsWinner(),
                     ticket.getRevealedPrize(),
                     ticket.getSkinnedGrid(),
-                    narrative);
+                    narrative,
+                    ticket.getGridCommitment(),
+                    ticket.getCommitmentSalt());
         }
 
         static TicketView revealed(RevealOutcome outcome, OutcomeNarrative narrative) {
@@ -126,7 +138,9 @@ public class TicketController {
                     outcome.winner(),
                     outcome.prizeAmount(),
                     outcome.skinnedGrid(),
-                    narrative);
+                    narrative,
+                    outcome.gridCommitment(),
+                    outcome.commitmentSalt());
         }
     }
 }

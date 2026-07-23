@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.luckledger.api.persistence.GameEntity;
 import com.luckledger.api.persistence.GameRepository;
 import com.luckledger.api.persistence.TicketBookRepository;
+import com.luckledger.api.persistence.TicketEntity;
 import com.luckledger.api.persistence.TicketRepository;
 import com.luckledger.domain.orchestration.GameStatus;
 import java.util.List;
@@ -70,5 +71,17 @@ class GameSeederIntegrationTest {
         });
         assertThat(seeded).extracting(GameEntity::getName)
                 .containsExactlyInAnyOrder("Celestial Fortune", "Demon Seal");
+    }
+
+    @Test
+    void everySeededTicketCarriesACommitmentAndSalt() {
+        // Commit-reveal (V008): every ticket the seeder plants must be stamped with a 64-hex commitment
+        // and a 32-hex salt so the outcome is provably pre-committed before any purchase.
+        List<TicketEntity> seededTickets = tickets.findAll();
+        assertThat(seededTickets).isNotEmpty();
+        assertThat(seededTickets).allSatisfy(t -> {
+            assertThat(t.getGridCommitment()).matches("[0-9a-f]{64}");
+            assertThat(t.getCommitmentSalt()).matches("[0-9a-f]{32}");
+        });
     }
 }

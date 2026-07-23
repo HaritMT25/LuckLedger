@@ -704,6 +704,70 @@ function matchedPositionSet(narrative) {
     return set;
 }
 
+/* --- commit-reveal proof -----------------------------------------------------
+   The backend stamps every ticket, at generation, with a SHA-256 commitment over its grid plus a
+   random salt (see GridCommitment.java). The commitment is public from purchase; the salt is withheld
+   until reveal. After the player scratches, we re-hash the now-visible grid with the disclosed salt and
+   confirm it matches the commitment that was fixed before purchase — proving the outcome pre-existed. */
+
+/* Rebuilds the canonical string the backend hashed.
+   MUST match GridCommitment.java's canonical encoding:
+     salt + "|" + rows + "x" + cols + "|" + symbols.join(",")
+   Symbols are each cell's abstract (mechanic) symbol in row-major order. The reveal serves the THEMED
+   grid, whose cells carry `abstractSymbol` — which is exactly the mechanic symbol the backend hashed
+   (the themed cell is skinned from the mechanic cell at the same position). Only the symbol is
+   canonicalized; the prize value is deliberately excluded. */
+function commitmentCanonical(grid, salt) {
+    const dim = grid.dimension;
+    const cells = [...grid.cells].sort((a, b) => a.row - b.row || a.col - b.col);
+    const symbols = cells.map((c) => c.abstractSymbol).join(',');
+    return `${salt}|${dim}x${dim}|${symbols}`;
+}
+
+/* Lowercase-hex SHA-256 of a string via WebCrypto. Returns null if crypto.subtle is unavailable
+   (an insecure context) so callers can degrade to showing the commitment without verification. */
+async function sha256Hex(text) {
+    if (!(window.crypto && crypto.subtle && crypto.subtle.digest)) return null;
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* Before scratching: shows the committed hash under the card, proving it was fixed before purchase.
+   Renders nothing when there is no commitment (legacy tickets). Leaves an empty verdict slot that
+   verifyCommitmentProof() fills in once the ticket is scratched. */
+function renderCommitmentProof(container, commitment) {
+    if (!container) return;
+    if (!commitment) { container.innerHTML = ''; return; }
+    const short = escapeHtml(commitment.slice(0, 16));
+    container.innerHTML = `
+        <p class="commitment-line" title="${escapeHtml(commitment)}">🔒 Committed: sha256 ${short}…</p>
+        <p class="commitment-note">This hash was fixed when the pool was printed — before you bought the ticket.</p>
+        <p class="commitment-verdict" id="commitment-verdict" hidden></p>`;
+}
+
+/* After reveal: recomputes the hash client-side from the revealed grid + disclosed salt and compares
+   it to the commitment. Match => the exact grid pre-existed; mismatch should never happen. If WebCrypto
+   is unavailable, degrades silently (the committed line already stands on its own). */
+async function verifyCommitmentProof(outcome) {
+    const verdict = document.getElementById('commitment-verdict');
+    if (!verdict) return;
+    if (!outcome.gridCommitment || !outcome.commitmentSalt || !outcome.grid) return;
+    let recomputed;
+    try {
+        recomputed = await sha256Hex(commitmentCanonical(outcome.grid, outcome.commitmentSalt));
+    } catch (e) { recomputed = null; }
+    if (recomputed === null) return; // insecure context: no error, just no verification badge
+    verdict.hidden = false;
+    if (recomputed === outcome.gridCommitment) {
+        verdict.className = 'commitment-verdict ok';
+        verdict.textContent = '✓ Proof checks out — this exact grid existed before purchase';
+    } else {
+        verdict.className = 'commitment-verdict bad';
+        verdict.textContent = '⚠ commitment mismatch';
+    }
+}
+
 async function renderScratch() {
     const t = loadPendingTicket();
     if (!t) { return renderPendingTickets(); }
@@ -728,6 +792,7 @@ async function renderScratch() {
             </div>
             <p class="scratch-instructions" id="scratch-progress" aria-live="polite">Scratch each panel to uncover what this
                 ticket was always going to be.</p>
+            <div class="commitment-proof" id="commitment-proof"></div>
             <div class="scratch-actions">
                 <button class="btn ghost" id="reveal-all">Reveal everything</button>
                 <button class="btn secondary" id="buy-another" hidden>Buy another</button>
@@ -793,9 +858,14 @@ async function renderScratch() {
     const matchedSet = matchedPositionSet(outcome.narrative);
     drawRevealLayer(revealLayer, zones, t.mechanic, gridData, matchedSet);
 
+    // Commit-reveal: show the committed hash NOW (before the player scratches), then verify it against
+    // the revealed grid + salt once the coating is off.
+    renderCommitmentProof(document.getElementById('commitment-proof'), outcome.gridCommitment);
+
     const onReveal = async () => {
         const detail = outcome.narrative ? outcome.narrative.summary : '';
         showResult(outcome, won, detail, t);
+        verifyCommitmentProof(outcome);
         await refreshPlayer();
     };
     const controller = initScratch(canvas, art, onReveal);

@@ -70,11 +70,34 @@ public class TicketEntity {
     @Column(name = "revealed_prize", precision = 19, scale = 4)
     private BigDecimal revealedPrize;
 
+    /**
+     * Commit-reveal proof: SHA-256 over the ticket's mechanic grid (see {@link GridCommitment}). Public
+     * from purchase — it is served on the masked pre-reveal view. Null for legacy rows generated before
+     * the scheme existed.
+     */
+    @Column(name = "grid_commitment", length = 64)
+    private String gridCommitment;
+
+    /**
+     * The salt feeding {@link #gridCommitment}. <strong>Secret until reveal</strong>: it must never be
+     * serialized on a pre-reveal view, or a client could brute-force the small grid space from the
+     * commitment and learn the outcome before scratching. Null for legacy rows.
+     */
+    @Column(name = "commitment_salt", length = 32)
+    private String commitmentSalt;
+
     protected TicketEntity() {}
 
     public TicketEntity(UUID id, UUID bookId, UUID gameId, UUID outcomeId, MechanicType mechanicType,
             BigDecimal prizeAmount, Integer positionInBook, TicketStatus status, GridCodec.GridDto grid,
             GridCodec.ThemedGridDto skinnedGrid) {
+        this(id, bookId, gameId, outcomeId, mechanicType, prizeAmount, positionInBook, status, grid,
+                skinnedGrid, null, null);
+    }
+
+    public TicketEntity(UUID id, UUID bookId, UUID gameId, UUID outcomeId, MechanicType mechanicType,
+            BigDecimal prizeAmount, Integer positionInBook, TicketStatus status, GridCodec.GridDto grid,
+            GridCodec.ThemedGridDto skinnedGrid, String gridCommitment, String commitmentSalt) {
         this.id = id;
         this.bookId = bookId;
         this.gameId = gameId;
@@ -85,6 +108,8 @@ public class TicketEntity {
         this.status = status;
         this.grid = grid;
         this.skinnedGrid = skinnedGrid;
+        this.gridCommitment = gridCommitment;
+        this.commitmentSalt = commitmentSalt;
         this.revealed = false;
     }
 
@@ -102,6 +127,8 @@ public class TicketEntity {
     public boolean isRevealed() { return revealed; }
     public Boolean getRevealedIsWinner() { return revealedIsWinner; }
     public BigDecimal getRevealedPrize() { return revealedPrize; }
+    public String getGridCommitment() { return gridCommitment; }
+    public String getCommitmentSalt() { return commitmentSalt; }
 
     public void setStatus(TicketStatus status) { this.status = status; }
 
