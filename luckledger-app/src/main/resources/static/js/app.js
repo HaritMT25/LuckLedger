@@ -793,6 +793,7 @@ async function renderScratch() {
             <p class="scratch-instructions" id="scratch-progress" aria-live="polite">Scratch each panel to uncover what this
                 ticket was always going to be.</p>
             <div class="commitment-proof" id="commitment-proof"></div>
+            <div class="loss-chasing-panel" id="loss-chasing" role="status" hidden></div>
             <div class="scratch-actions">
                 <button class="btn ghost" id="reveal-all">Reveal everything</button>
                 <button class="btn secondary" id="buy-another" hidden>Buy another</button>
@@ -981,43 +982,150 @@ function showResult(outcome, won, detail, ticket) {
                 `${pct}% of this game's losing tickets are engineered to land one step from a win.`;
         }).catch(() => { /* education is best-effort */ });
     }
+
+    // In-the-moment loss-chasing nudge: only after a LOSS, and only if the domain's loss-chasing
+    // insight actually fires. Non-blocking, never shown on a win, and silent if the fetch fails.
+    if (!won && state.player) {
+        Api.insights(state.player.playerId).then((list) => {
+            const panel = document.getElementById('loss-chasing');
+            if (!panel) return; // navigated away
+            const lc = (list || []).find((i) => i.type === 'LOSS_CHASING');
+            if (!lc) return;
+            panel.innerHTML = `
+                <span class="lc-title">⚠ ${escapeHtml(lc.title || 'Loss chasing')}</span>
+                <span class="lc-msg">${escapeHtml(lc.message || '')}</span>
+                <a class="lc-link" href="#ledger">See your story →</a>`;
+            panel.hidden = false;
+        }).catch(() => { /* best-effort: on failure, show nothing */ });
+    }
 }
 
 // ---- ledger ----------------------------------------------------------------
 
 async function renderLedger() {
     if (!state.player) return;
-    view.innerHTML = `<div class="section-title"><h2>Your ledger</h2>
-        <span class="hint">Every coin movement, and what the numbers really say.</span></div>
+    view.innerHTML = `<div class="section-title"><h2>📖 Your story</h2>
+        <span class="hint">Here is what gambling actually did to your balance — every coin, and what the
+            numbers really say.</span></div>
         <div id="ledger-body">${skeletonCards(3)}</div>`;
     try {
         const pid = state.player.playerId;
-        const [p, txns, insights, curve, dealerCmp] = await Promise.all([
+        const [p, txns, insights, curve, dealerCmp, games] = await Promise.all([
             Api.getPlayer(pid),
             Api.transactions(pid, 25),
             Api.insights(pid).catch(() => []),
             Api.curve(pid).catch(() => []),
             Api.dealerComparison(pid).catch(() => ({})),
+            loadGames().catch(() => []),
         ]);
-        const net = Number(p.netPosition);
+        // Personal RTP and net position are derived here, straight from the player's own totals, so the
+        // headline mirrors exactly what the ledger recorded (won ÷ spent, won − spent).
+        const spent = Number(p.totalSpent);
+        const won = Number(p.totalWon);
+        const net = won - spent;
+        const personalRtp = spent > 0 ? `${Math.round((won / spent) * 100)}%` : '—';
+        const designedRtp = designedRtpFraction(games); // fraction (e.g. 0.65), or null when unknown
         const body = document.getElementById('ledger-body');
         if (!body) return;
         body.innerHTML = `
             <div class="stats">
-                ${stat('Balance', money(p.coinBalance) + ' coins')}
                 ${stat('Borrowed', money(p.totalBorrowed))}
                 ${stat('Spent', money(p.totalSpent))}
-                ${stat('Won', money(p.totalWon))}
+                ${stat('Won back', money(p.totalWon))}
+                ${stat('Your RTP', personalRtp)}
                 ${stat('Net position', (net >= 0 ? '+' : '') + money(net), net >= 0 ? 'good' : 'bad')}
             </div>
+            ${rtpConvergenceSection(curve, designedRtp)}
             ${curveSection(curve)}
             ${dealerComparisonSection(dealerCmp)}
-            ${insights.length ? `<h3>Insights</h3>${insights.map(renderInsight).join('')}` : ''}
-            <h3>Recent transactions</h3>
+            ${insightsSection(insights)}
+            <h3>Every transaction</h3>
             ${txns.length ? txnTable(txns) : '<p class="empty">No transactions yet — borrow and play.</p>'}`;
     } catch (e) {
         document.getElementById('ledger-body').innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
     }
+}
+
+/** Average designed payout ratio across the seeded games, as a fraction; null when none are known. */
+function designedRtpFraction(games) {
+    const ratios = (games || [])
+        .map((g) => Number(g.payoutRatio))
+        .filter((r) => Number.isFinite(r) && r > 0);
+    if (!ratios.length) return null;
+    return ratios.reduce((a, b) => a + b, 0) / ratios.length;
+}
+
+/* The lesson chart: the player's own cumulative RTP (won ÷ spent after each ticket) walking toward the
+   RTP the house designed in. Fed by /curve — each CurvePoint carries cumulativeSpent and cumulativeWon,
+   so RTP at ticket n is simply cumulativeWon(n) / cumulativeSpent(n). Points before any spend (spent = 0)
+   are skipped; with fewer than two plottable points we show copy instead of an empty chart. */
+function rtpConvergenceSection(curve, designedFrac) {
+    const pts = (curve || [])
+        .filter((p) => Number(p.cumulativeSpent) > 0)
+        .map((p) => ({ n: p.ticketNumber, rtp: (Number(p.cumulativeWon) / Number(p.cumulativeSpent)) * 100 }));
+    const designedPct = designedFrac != null ? designedFrac * 100 : null;
+    if (pts.length < 2) {
+        return `<div class="chart-panel"><h3>Your RTP, ticket by ticket</h3>
+            <p class="empty">Scratch a few tickets and watch your personal return-to-player walk toward
+                the house's number.</p></div>`;
+    }
+    const W = 640, H = 220, P = 40;
+    const minX = pts[0].n, maxX = pts[pts.length - 1].n;
+    const rtps = pts.map((p) => p.rtp);
+    // Headroom so an early lucky spike and the designed line both sit inside the frame; rounded to 20s.
+    let top = Math.max(100, designedPct || 0, ...rtps) * 1.1;
+    top = Math.max(20, Math.ceil(top / 20) * 20);
+    const x = (v) => P + ((v - minX) / Math.max(1, maxX - minX)) * (W - 2 * P);
+    const y = (v) => H - P - (Math.min(v, top) / top) * (H - 2 * P);
+    const poly = pts.map((p) => `${x(p.n).toFixed(1)},${y(p.rtp).toFixed(1)}`).join(' ');
+    const lastRtp = Math.round(rtps[rtps.length - 1]);
+    const designedRound = designedPct != null ? Math.round(designedPct) : null;
+    const designedLine = designedPct != null
+        ? `<line class="designed-line" x1="${P}" y1="${y(designedPct).toFixed(1)}"
+               x2="${W - P}" y2="${y(designedPct).toFixed(1)}"/>
+           <text class="designed-label" x="${W - P}" y="${(y(designedPct) - 6).toFixed(1)}"
+               text-anchor="end">designed ${designedRound}%</text>`
+        : '';
+    const aria = designedRound != null
+        ? `Your RTP after ${maxX} tickets: ${lastRtp}% versus designed ${designedRound}%`
+        : `Your RTP after ${maxX} tickets: ${lastRtp}%`;
+    const caption = designedRound != null
+        ? `Early wins and losses are just variance. The longer you play, the closer your real return
+            crawls toward the number the house built in — about ${designedRound}%. That was fixed before
+            you scratched a thing.`
+        : `Early wins and losses are just variance. The longer you play, the closer your real return
+            crawls toward the house's designed number — fixed before you scratched a thing.`;
+    return `<div class="chart-panel">
+        <h3>Your RTP, ticket by ticket</h3>
+        <p class="chart-sub">${caption}</p>
+        <svg class="rtp-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(aria)}">
+            <line x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}" class="axis"/>
+            <line x1="${P}" y1="${P}" x2="${P}" y2="${H - P}" class="axis"/>
+            <text x="${P - 6}" y="${P + 4}" class="axis-label" text-anchor="end">${top}%</text>
+            <text x="${P - 6}" y="${H - P}" class="axis-label" text-anchor="end">0%</text>
+            <text x="${W - P}" y="${H - P + 16}" class="axis-label" text-anchor="end">ticket ${maxX}</text>
+            ${designedLine}
+            <polyline class="line rtp" points="${poly}"/>
+        </svg>
+        <div class="legend">
+            <span class="legend-item"><span class="swatch rtp"></span>Your RTP now <b>${lastRtp}%</b></span>
+            ${designedRound != null
+                ? `<span class="legend-item"><span class="swatch designed"></span>Designed ${designedRound}%</span>`
+                : ''}
+        </div>
+    </div>`;
+}
+
+/** The surfaced insights: every observation the domain returned, its numbers shown verbatim. */
+function insightsSection(insights) {
+    if (!insights || !insights.length) {
+        return `<div class="chart-panel"><h3>What your story says</h3>
+            <p class="empty">Play a few tickets and your story starts writing itself.</p></div>`;
+    }
+    return `<div class="story-insights">
+        <h3>What your story says</h3>
+        ${insights.map(renderInsight).join('')}
+    </div>`;
 }
 
 /** The inevitability curve: cumulative spent vs cumulative won, ticket by ticket. */
@@ -1088,7 +1196,11 @@ function stat(label, value, cls) {
 function renderInsight(ins) {
     const title = ins.title || ins.headline || ins.type || 'Insight';
     const msg = ins.message || ins.description || ins.detail || '';
-    return `<div class="insight"><h4>${escapeHtml(title)}</h4><p>${escapeHtml(msg)}</p></div>`;
+    // Colour the card by the domain's own severity (INFO / WARNING / CRITICAL); the message already
+    // carries the real numbers, so it is shown verbatim rather than paraphrased.
+    const sev = String(ins.severity || '').toLowerCase();
+    const sevClass = ['info', 'warning', 'critical'].includes(sev) ? ` sev-${sev}` : '';
+    return `<div class="insight${sevClass}"><h4>${escapeHtml(title)}</h4><p>${escapeHtml(msg)}</p></div>`;
 }
 
 function txnTable(txns) {
