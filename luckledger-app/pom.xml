@@ -62,4 +62,17 @@
             </exclusions>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Repackage the module into an executable fat jar (main manifest + nested deps)
+                 so `java -jar luckledger-app.jar` — and the Docker image — can boot it. The
+                 version is managed by spring-boot-starter-parent; library modules omit this
+                 plugin and stay plain jars. -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>

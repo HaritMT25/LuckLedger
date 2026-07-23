@@ -1,0 +1,51 @@
+# LuckLedger — one-command quickstart:
+#
+#     docker compose -f compose.prod.yaml up --build
+#
+# then open http://localhost:8080
+#
+# This builds the app image from the repo Dockerfile and runs it against a
+# throwaway Postgres. Unlike luckledger-app/compose.yaml (dev only, auto-started
+# by `mvn spring-boot:run`), the app container has Spring's docker-compose support
+# switched OFF and reaches Postgres over the compose network by service name.
+#
+# Master (operator) password: leave LUCKLEDGER_MASTER_PASSWORD unset and the app
+# mints a random one-time password, printed once at startup —
+#     docker compose -f compose.prod.yaml logs app | grep -i "one-time password"
+# Pin your own with:  LUCKLEDGER_MASTER_PASSWORD=secret docker compose -f compose.prod.yaml up --build
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: luckledger
+      POSTGRES_USER: luckledger
+      POSTGRES_PASSWORD: luckledger
+    # Port is intentionally NOT published to the host: the app reaches Postgres on
+    # the internal compose network, so this never collides with a local 5432.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U luckledger -d luckledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/luckledger
+      SPRING_DATASOURCE_USERNAME: luckledger
+      SPRING_DATASOURCE_PASSWORD: luckledger
+      # Inside the container we point at the composed Postgres by env above, so the
+      # dev-only docker-compose auto-start must stay off.
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+      # Passthrough: unset -> app generates + logs a one-time password (see top comment).
+      LUCKLEDGER_MASTER_PASSWORD: "${LUCKLEDGER_MASTER_PASSWORD:-}"
+
+volumes:
+  pgdata:
