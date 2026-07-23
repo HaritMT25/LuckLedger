@@ -1,0 +1,12 @@
+{
+  "name": "luckledger-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright end-to-end UI pass for the LuckLedger SPA.",
+  "scripts": {
+    "test": "node ui-pass.js"
+  },
+  "dependencies": {
+    "playwright": "1.61.1"
+  }
+}
