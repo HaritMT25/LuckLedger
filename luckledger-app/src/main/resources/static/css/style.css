@@ -458,6 +458,19 @@ body {
 .scratch-actions { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
 .scratch-actions a.btn { text-decoration: none; display: inline-block; }
 
+/* in-the-moment loss-chasing nudge: shown under a losing ticket, never on a win */
+.loss-chasing-panel {
+    display: flex; flex-direction: column; gap: .25rem; text-align: left;
+    margin: .2rem auto 0; max-width: 340px; padding: .7rem .9rem;
+    border: 1px solid rgba(248, 113, 113, .4); border-left: 3px solid var(--bad);
+    border-radius: 8px; background: rgba(248, 113, 113, .07);
+}
+.loss-chasing-panel[hidden] { display: none; }
+.loss-chasing-panel .lc-title { font-weight: 700; font-size: .84rem; color: var(--bad); }
+.loss-chasing-panel .lc-msg { font-size: .8rem; color: var(--muted); line-height: 1.4; }
+.loss-chasing-panel .lc-link { font-size: .8rem; font-weight: 600; color: var(--accent-2); text-decoration: none; }
+.loss-chasing-panel .lc-link:hover { text-decoration: underline; }
+
 /* ---- ledger ------------------------------------------------------------------ */
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; margin-bottom: 1.2rem; }
@@ -480,6 +493,12 @@ tbody tr:hover { background: rgba(139, 92, 246, .06); }
 .insight { background: var(--panel); border-left: 3px solid var(--accent); border-radius: 8px; padding: .8rem 1rem; margin-bottom: .6rem; }
 .insight h4 { margin: 0 0 .3rem; }
 .insight p { margin: 0; color: var(--muted); font-size: .9rem; }
+/* severity accents match the domain's InsightSeverity: neutral teaching → warning → harmful pattern */
+.insight.sev-info { border-left-color: var(--accent-2); }
+.insight.sev-warning { border-left-color: var(--gold); }
+.insight.sev-critical { border-left-color: var(--bad); background: rgba(248, 113, 113, .05); }
+.story-insights { margin-bottom: 1.2rem; }
+.story-insights h3 { margin: 0 0 .6rem; }
 
 /* awareness charts */
 .chart-panel {
@@ -499,6 +518,16 @@ tbody tr:hover { background: rgba(139, 92, 246, .06); }
 .swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
 .swatch.spent { background: var(--bad); }
 .swatch.won { background: var(--gold); }
+
+/* personal RTP convergence chart */
+.rtp-chart { width: 100%; height: auto; display: block; }
+.rtp-chart .axis { stroke: var(--border); stroke-width: 1; }
+.rtp-chart .axis-label { fill: var(--muted); font-size: 11px; }
+.rtp-chart .line.rtp { fill: none; stroke: var(--accent-2); stroke-width: 2.5; stroke-linejoin: round; }
+.rtp-chart .designed-line { stroke: var(--gold); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .8; }
+.rtp-chart .designed-label { fill: var(--gold); font-size: 11px; }
+.swatch.rtp { background: var(--accent-2); }
+.swatch.designed { background: var(--gold); height: 0; border-top: 3px dashed var(--gold); }
 
 /* per-shop return-rate bars */
 .cmp-row { display: grid; grid-template-columns: minmax(90px, 160px) 1fr auto; gap: .7rem; align-items: center; margin-bottom: .5rem; }
