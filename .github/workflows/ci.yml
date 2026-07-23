@@ -40,7 +40,9 @@ jobs:
           node-version: '20'
 
       - name: Start application
-        run: mvn -B -pl luckledger-app spring-boot:run > app.log 2>&1 &
+        # -am builds the sibling modules in the same reactor: a fresh runner's ~/.m2 has no
+        # luckledger artifacts, so plain -pl cannot resolve them.
+        run: mvn -B -am -pl luckledger-app spring-boot:run > app.log 2>&1 &
 
       - name: Wait for /api/health
         run: |
