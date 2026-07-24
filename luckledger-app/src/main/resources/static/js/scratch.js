@@ -2,40 +2,100 @@
  *
  * The full ticket PNG is drawn onto this canvas; it is the silver foil. Scratching is confined to the
  * calibrated zones in config/scratch-zones.json: a pointer only lifts coating within the zone it is
- * currently inside (each stroke is clipped to that zone's circle/rect), so the spaces between zones,
- * the title, badges and the centre demon stay covered. Each zone tracks its own scratched fraction and
+ * currently inside (each erase is clipped to that zone's outline), so the spaces between zones, the
+ * title, badges and the centre demon stay covered. Each zone tracks its own scratched fraction and
  * clears independently once ~70% of *its* coating is gone, uncovering the reveal layer beneath — the
  * ticket's real values (numbers or seal tiles), which js/views/play.js renders into #reveal-layer from the grid
  * served by the API. When every zone has revealed, `onReveal` fires exactly once. If the zone config
- * can't be matched the engine falls back to the legacy whole-surface scratch so the card still works. */
+ * can't be matched the engine falls back to the legacy whole-surface scratch so the card still works.
+ *
+ * FEEL: the surface stays GPU-accelerated — there are NO pixel readbacks (no getImageData, no
+ * willReadFrequently). Coverage is tracked geometrically: each zone owns a coarse boolean cell grid,
+ * and every erase stamp marks the cells it touches, so progress mirrors exactly what was rubbed off.
+ * Erasing uses a soft feathered brush stamped along interpolated, coalesced pointer paths and batched
+ * once per animation frame; a crossed zone dissolves its remaining coating out over ~220ms rather than
+ * popping. On retina the backing store is scaled by devicePixelRatio while every computation below stays
+ * in the canvas's LOGICAL units, so the coating and stamps render crisp. */
 
 /**
  * Initialise a scratch surface on a canvas, using a ticket PNG as the full coating.
  * @param {HTMLCanvasElement} canvas the scratch canvas
  * @param {string} pngPath path to the ticket PNG (the coating drawn over the dark reveal layer)
  * @param {Function} onReveal invoked exactly once when the reveal threshold (70%) is reached
- * @returns {{reset: Function}} a small controller; call reset() to re-coat and allow scratching again
+ * @returns {{revealAll: Function, reset: Function}} a small controller; revealAll() lifts everything at
+ *   once, reset() re-coats and allows scratching again
  */
 function initScratch(canvas, pngPath, onReveal = () => {}) {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    // LOGICAL size: the canvas's authored width/height (play.js writes width="360" height="640", the
+    // e2e sweep and every fraction in scratch-zones.json are relative to these). Read them BEFORE we
+    // grow the backing store — from here on W/H are the only coordinate space this file speaks.
     const W = canvas.width;
     const H = canvas.height;
+    // Drop willReadFrequently (there are no readbacks) so the canvas stays GPU-accelerated, and ask for
+    // a desynchronized surface for lower pointer-to-paint latency where the browser supports it.
+    const ctx = canvas.getContext('2d', { desynchronized: true });
+    // Retina crispness: back the canvas with logical × DPR device pixels (capped at 2 so a 3x phone
+    // doesn't quadruple fill cost), then scale the drawing matrix so every draw below can keep using
+    // logical units. Resizing the canvas resets its context state, so the transform is set AFTER.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     const brush = Math.max(28, Math.round(W * 0.08)); // ~ a fingertip/coin on a 360px-wide canvas
+    const stampR = brush / 2;                          // nominal erase radius (logical)
+    const step = brush / 3;                            // interpolation + grid-cell granularity
     const threshold = 0.7;
 
     let loaded = false;
     let revealed = false;
     let scratching = false;
-    let moveCount = 0;
-    let last = null;
+    let last = null;           // last stamped point (logical), so segments interpolate; null breaks the line
+    let pointerType = 'mouse'; // pointerType of the active pointer (drives touch-only haptics)
 
     const FALLBACK_COLOR = '#241c42'; // opaque coating used when the PNG can't be drawn
+
+    function reducedMotion() {
+        // core.js publishes REDUCED_MOTION in the shared classic-script scope; guard with typeof so the
+        // engine still runs (motion on) if ever loaded on its own.
+        return typeof REDUCED_MOTION !== 'undefined' && REDUCED_MOTION;
+    }
+
+    // ----- Soft brush stamp ---------------------------------------------------------------------
+    // One offscreen brush built at init: an opaque core out to 60% of the radius, feathering to fully
+    // transparent at the edge. Erasing draws this with destination-out, so the ragged, soft-edged alpha
+    // profile is what lifts — no hard-edged discs. Supersampled ×2 for a smooth gradient when scaled.
+    const stamp = document.createElement('canvas');
+    const stampSize = Math.max(2, Math.ceil(brush) * 2);
+    stamp.width = stamp.height = stampSize;
+    (function paintStamp() {
+        const sctx = stamp.getContext('2d');
+        const c = stampSize / 2;
+        const g = sctx.createRadialGradient(c, c, 0, c, c, c);
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(0.6, 'rgba(0,0,0,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        sctx.fillStyle = g;
+        sctx.beginPath();
+        sctx.arc(c, c, c, 0, Math.PI * 2);
+        sctx.fill();
+    })();
+
+    // Radius for a single stamp: ±8% jitter for a subtly ragged scraped edge, scaled by pen pressure
+    // when the pointer reports a usable value (mouse/touch report 0 here and stamp at the nominal size).
+    function _radiusFor(pressure) {
+        const jitter = 0.92 + Math.random() * 0.16;
+        const pScale = pressure > 0 ? (0.8 + 0.4 * pressure) : 1;
+        return stampR * jitter * pScale;
+    }
 
     // ----- Per-zone scratch model ---------------------------------------------------------------
     let zones = null;          // array of scratchable zones once loaded; null while loading
     let zonesFailed = false;   // true if config missing/unmatched => fall back to whole-surface scratch
     let lastZoneId = null;     // zone the last stroke was in, so the line never bridges across a gap
     const revealedZones = new Set();
+    const dissolving = new Set(); // zones currently animating their coating out (guards re-triggering)
+    let fallbackDissolving = false;
 
     // Zone geometry in canvas pixels. Circles: cx/cy fractions of W/H, r a fraction of W. Rects:
     // x/w fractions of W, y/h fractions of H. (Matches the scratch-zones.json note.)
@@ -56,44 +116,82 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         }
         return null;
     }
-    // Trace a zone's outline as the current path (caller clips or fills it).
+    // A zone's outline as a reusable Path2D, precomputed once so per-frame clip/fill never rebuilds it.
     function _zonePath(z) {
-        ctx.beginPath();
-        if (z.shape === 'circle') ctx.arc(z.cx * W, z.cy * H, z.r * W, 0, Math.PI * 2);
-        else ctx.rect(z.x * W, z.y * H, z.w * W, z.h * H);
+        const p = new Path2D();
+        if (z.shape === 'circle') p.arc(z.cx * W, z.cy * H, z.r * W, 0, Math.PI * 2);
+        else p.rect(z.x * W, z.y * H, z.w * W, z.h * H);
+        return p;
     }
-    // Fraction (0..1) of a single zone's coating that has been scratched away.
-    function _zoneClearFraction(z) {
-        const b = _bounds(z);
-        const bx = Math.max(0, Math.floor(b.x)), by = Math.max(0, Math.floor(b.y));
-        const bw = Math.min(W - bx, Math.ceil(b.w)), bh = Math.min(H - by, Math.ceil(b.h));
-        if (bw <= 0 || bh <= 0) return 0;
-        const data = ctx.getImageData(bx, by, bw, bh).data;
-        const cxp = z.cx * W, cyp = z.cy * H, rp2 = (z.r * W) * (z.r * W);
-        let clear = 0, total = 0;
-        for (let yy = 0; yy < bh; yy += 2) {
-            for (let xx = 0; xx < bw; xx += 2) {
-                if (z.shape === 'circle') {
-                    const dx = bx + xx - cxp, dy = by + yy - cyp;
-                    if (dx * dx + dy * dy > rp2) continue; // only count pixels inside the circle
+
+    // ----- Geometric coverage grid --------------------------------------------------------------
+    // A coarse boolean grid over a bounds box (cell ≈ brush/3). Only cells whose centre lies inside the
+    // zone shape count toward `total`. Erase stamps mark the cells within their radius, so fraction =
+    // marked/total exactly tracks what the (zone-clipped) stamps removed — no pixel sampling needed.
+    function _buildGrid(b, z) {
+        const cols = Math.max(1, Math.ceil(b.w / step));
+        const rows = Math.max(1, Math.ceil(b.h / step));
+        const inside = new Uint8Array(cols * rows);
+        const mark = new Uint8Array(cols * rows);
+        let total = 0;
+        for (let ry = 0; ry < rows; ry++) {
+            for (let rx = 0; rx < cols; rx++) {
+                const cxp = b.x + (rx + 0.5) * step;
+                const cyp = b.y + (ry + 0.5) * step;
+                let inZone = true;
+                if (z && z.shape === 'circle') {
+                    const dx = cxp - z.cx * W, dy = cyp - z.cy * H, r = z.r * W;
+                    inZone = dx * dx + dy * dy <= r * r; // only cells truly under the circle count
                 }
-                total++;
-                if (data[(yy * bw + xx) * 4 + 3] < 128) clear++;
+                if (inZone) { inside[ry * cols + rx] = 1; total++; }
             }
         }
-        return total ? clear / total : 0;
+        return { cols, rows, ox: b.x, oy: b.y, inside, mark, total, count: 0 };
     }
-    // Lift a zone's remaining coating and mark it revealed; fire onReveal once every zone is open.
-    // Each clear announces itself as a 'zonereveal' event on the canvas so the UI can pop the
-    // uncovered tile and advance a progress count.
-    function _revealZone(z) {
-        if (revealedZones.has(z.id)) return;
+    // Mark every countable cell whose centre is within radius R of an erase stamp at (x,y).
+    function _markGrid(grid, x, y, R) {
+        if (!grid) return;
+        const { cols, rows, ox, oy } = grid;
+        const minX = Math.max(0, Math.floor((x - R - ox) / step));
+        const maxX = Math.min(cols - 1, Math.floor((x + R - ox) / step));
+        const minY = Math.max(0, Math.floor((y - R - oy) / step));
+        const maxY = Math.min(rows - 1, Math.floor((y + R - oy) / step));
+        const R2 = R * R;
+        for (let ry = minY; ry <= maxY; ry++) {
+            for (let rx = minX; rx <= maxX; rx++) {
+                const idx = ry * cols + rx;
+                if (grid.mark[idx] || !grid.inside[idx]) continue;
+                const dx = ox + (rx + 0.5) * step - x, dy = oy + (ry + 0.5) * step - y;
+                if (dx * dx + dy * dy <= R2) { grid.mark[idx] = 1; grid.count++; }
+            }
+        }
+    }
+    function _fraction(grid) { return grid && grid.total ? grid.count / grid.total : 0; }
+
+    // Grid over the WHOLE canvas, used only by the legacy fallback (config unmatched).
+    const fallbackGrid = _buildGrid({ x: 0, y: 0, w: W, h: H }, null);
+
+    // Precompute each zone's Path2D + coverage grid once it is known.
+    function _prepZones() {
+        if (!zones) return;
+        for (const z of zones) { z._path = _zonePath(z); z._grid = _buildGrid(_bounds(z), z); }
+    }
+
+    // Lift a zone's coating instantly (no animation) — shared by the reduced-motion path, revealAll(),
+    // and the dissolve's final settle.
+    function _clearZone(z) {
         ctx.save();
         ctx.globalCompositeOperation = 'destination-out';
-        _zonePath(z);
-        ctx.fillStyle = 'rgba(0,0,0,1)';
-        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fill(z._path);
         ctx.restore();
+    }
+    // Finalise a zone: ensure it is fully clear, record it, announce 'zonereveal', and fire onReveal once
+    // every zone is open. Idempotent so an interrupted dissolve (or revealAll mid-flight) is safe.
+    function _completeZone(z) {
+        dissolving.delete(z.id);
+        if (revealedZones.has(z.id)) return;
+        _clearZone(z);
         revealedZones.add(z.id);
         canvas.dispatchEvent(new CustomEvent('zonereveal', {
             detail: { zoneId: z.id, revealed: revealedZones.size, total: zones.length },
@@ -102,6 +200,61 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
             revealed = true;
             onReveal();
         }
+    }
+    // Animate a zone's remaining coating out over ~220ms: each frame removes an ease-out slice via a
+    // clipped destination-out fill (incremental alpha, so the leftover multiplies down to nothing), THEN
+    // completes. Under reduced motion it clears instantly, exactly as before.
+    function _dissolveZone(z) {
+        if (revealedZones.has(z.id) || dissolving.has(z.id)) return;
+        if (reducedMotion()) { _completeZone(z); return; }
+        dissolving.add(z.id);
+        const start = performance.now();
+        let prevE = 0;
+        const frame = (now) => {
+            const t = Math.min(1, (now - start) / 220);
+            const e = 1 - (1 - t) * (1 - t);                 // easeOutQuad: fraction removed so far
+            const a = e >= 1 ? 1 : (e - prevE) / (1 - prevE); // slice of the *remaining* coating this frame
+            prevE = e;
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.globalAlpha = a;
+            ctx.fill(z._path);
+            ctx.restore();
+            if (t < 1 && dissolving.has(z.id)) requestAnimationFrame(frame);
+            else _completeZone(z);
+        };
+        requestAnimationFrame(frame);
+    }
+
+    // Legacy fallback reveal: dissolve (or, reduced-motion, clear) the whole surface once, then fire.
+    function _completeFallback() {
+        fallbackDissolving = false;
+        if (revealed) return;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.clearRect(0, 0, W, H);
+        revealed = true;
+        onReveal();
+    }
+    function _dissolveFallback() {
+        if (revealed || fallbackDissolving) return;
+        if (reducedMotion()) { _completeFallback(); return; }
+        fallbackDissolving = true;
+        const start = performance.now();
+        let prevE = 0;
+        const frame = (now) => {
+            const t = Math.min(1, (now - start) / 220);
+            const e = 1 - (1 - t) * (1 - t);
+            const a = e >= 1 ? 1 : (e - prevE) / (1 - prevE);
+            prevE = e;
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.globalAlpha = a;
+            ctx.fillRect(0, 0, W, H);
+            ctx.restore();
+            if (t < 1) requestAnimationFrame(frame);
+            else _completeFallback();
+        };
+        requestAnimationFrame(frame);
     }
 
     // Identify the mechanic from the ticket PNG filename, then load that ticket's scratch zones.
@@ -117,7 +270,8 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
                         break;
                     }
                 }
-                if (!zones) { zonesFailed = true; } // unmatched PNG => legacy whole-surface scratch
+                if (!zones) { zonesFailed = true; return; } // unmatched PNG => legacy whole-surface scratch
+                _prepZones();
             })
             .catch(() => { zonesFailed = true; });
     }
@@ -171,7 +325,8 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
     if (imageReady()) paintCoating(); // already cached and decoded
     _loadZones(); // resolve mechanic + zones (async); scratching falls back to whole-surface until ready
 
-    // Map client coords to canvas coords, accounting for CSS scaling.
+    // Map client coords to canvas coords, accounting for CSS scaling. W/H are logical, so this yields
+    // logical coordinates regardless of the DPR-scaled backing store.
     function _pos(e) {
         const r = canvas.getBoundingClientRect();
         return {
@@ -180,98 +335,119 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         };
     }
 
-    // Erase a round dot and, while dragging, a continuous fat line from the previous point. When `zone`
-    // is given the erase is clipped to that zone's outline, so only its coating lifts; without a zone
-    // (legacy fallback) the whole surface erases. Every other stroke announces its position as a
-    // 'scratchstroke' event so the UI can throw foil shavings off the pointer.
-    let strokeCount = 0;
-    function _stroke({ x, y }, zone) {
-        if (++strokeCount % 2 === 0) {
-            canvas.dispatchEvent(new CustomEvent('scratchstroke', { detail: { x, y } }));
-        }
-        ctx.save();
-        if (zone) { _zonePath(zone); ctx.clip(); }
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = brush;
-        ctx.strokeStyle = 'rgba(0,0,0,1)';
-        ctx.fillStyle = 'rgba(0,0,0,1)';
-        if (last) {
-            ctx.beginPath();
-            ctx.moveTo(last.x, last.y);
-            ctx.lineTo(x, y);
-            ctx.stroke();
-        }
-        ctx.beginPath();
-        ctx.arc(x, y, brush / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-        last = { x, y };
-    }
+    // ----- Per-frame batching -------------------------------------------------------------------
+    // Incoming points queue here (each tagged with its zone + pressure) and flush once per animation
+    // frame. Interpolating segments into ≤ step-spaced stamps gives even coverage and natural edges,
+    // and batching means one save/clip/restore per zone per frame instead of per point.
+    let pending = [];
+    let flushScheduled = false;
+    let lastVibe = 0;
 
-    // Reveal logic. With zones loaded, each zone clears independently once ~70% of *its* coating is
-    // gone (passing `zone` checks just that one — cheap, for the active stroke). Without zones (config
-    // unmatched) it falls back to the legacy whole-surface 70% check that clears everything at once.
-    function _check(zone) {
-        if (revealed || !loaded) return; // no coating yet => never reveal
-        if (!zones && !zonesFailed) return; // zones still loading: nothing to check yet
-        if (zonesFailed) {
-            const data = ctx.getImageData(0, 0, W, H).data;
-            let clear = 0;
-            let total = 0;
-            // Sample every 4th pixel in both x and y (alpha channel only) to cut per-check cost.
-            const rowBytes = W * 4;
-            for (let y = 0; y < H; y += 4) {
-                const rowStart = y * rowBytes;
-                for (let x = 0; x < W; x += 4) {
-                    const alpha = data[rowStart + x * 4 + 3];
-                    total++;
-                    if (alpha < 128) clear++;
-                }
+    function _scheduleFlush() {
+        if (!flushScheduled) { flushScheduled = true; requestAnimationFrame(_flush); }
+    }
+    // Queue the stamps for the segment from `last` to `p` (or just `p` when the line was broken), each at
+    // ≤ step spacing so no fat single line — a run of soft stamps instead.
+    function _enqueueSegment(p, zone, pressure) {
+        if (last) {
+            const dx = p.x - last.x, dy = p.y - last.y;
+            const n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / step));
+            for (let i = 1; i <= n; i++) {
+                const f = i / n;
+                pending.push({ x: last.x + dx * f, y: last.y + dy * f, zone, pressure });
             }
-            if (total > 0 && clear / total >= threshold) {
-                ctx.globalCompositeOperation = 'source-over';
-                ctx.clearRect(0, 0, W, H);
-                revealed = true;
-                onReveal();
+        } else {
+            pending.push({ x: p.x, y: p.y, zone, pressure });
+        }
+        last = { x: p.x, y: p.y };
+    }
+    // Throttled, touch-only haptic tick on erase (≥90ms apart), best-effort.
+    function _maybeVibrate() {
+        if (pointerType !== 'touch') return;
+        const now = performance.now();
+        if (now - lastVibe < 90) return;
+        lastVibe = now;
+        try { navigator.vibrate && navigator.vibrate(8); } catch (_) { /* unsupported */ }
+    }
+    // Announce at most two representative points per flushed frame as 'scratchstroke' so the UI's foil
+    // shavings + scratch sound keep a cadence close to the old every-other-move rate.
+    function _emitStrokes(pts) {
+        if (!pts.length) return;
+        const reps = pts.length === 1 ? [pts[0]] : [pts[0], pts[(pts.length / 2) | 0]];
+        for (const pt of reps) {
+            canvas.dispatchEvent(new CustomEvent('scratchstroke', { detail: { x: pt.x, y: pt.y } }));
+        }
+    }
+    // Flush the queue: group points by zone, then per zone do ONE clipped destination-out pass stamping
+    // every point (marking the coverage grid as we go). A zone that crosses 70% dissolves out.
+    function _flush() {
+        flushScheduled = false;
+        if (!pending.length || revealed) { pending = []; return; }
+        const pts = pending;
+        pending = [];
+        const groups = new Map();
+        for (const pt of pts) {
+            const key = pt.zone ? pt.zone.id : '__all__';
+            let g = groups.get(key);
+            if (!g) { g = { zone: pt.zone, points: [] }; groups.set(key, g); }
+            g.points.push(pt);
+        }
+        for (const g of groups.values()) {
+            const z = g.zone;
+            if (z && (revealedZones.has(z.id) || dissolving.has(z.id))) continue;
+            if (!z && (revealed || fallbackDissolving)) continue;
+            const grid = z ? z._grid : fallbackGrid;
+            ctx.save();
+            if (z) ctx.clip(z._path); // only this zone's coating lifts
+            ctx.globalCompositeOperation = 'destination-out';
+            for (const pt of g.points) {
+                const r = _radiusFor(pt.pressure);
+                ctx.drawImage(stamp, pt.x - r, pt.y - r, r * 2, r * 2);
+                _markGrid(grid, pt.x, pt.y, r);
             }
-            return;
+            ctx.restore();
+            if (_fraction(grid) >= threshold) {
+                if (z) _dissolveZone(z); else _dissolveFallback();
+            }
         }
-        for (const z of (zone ? [zone] : zones)) {
-            if (revealedZones.has(z.id)) continue;
-            if (_zoneClearFraction(z) >= threshold) _revealZone(z);
-        }
+        _emitStrokes(pts);
+        _maybeVibrate();
     }
 
     canvas.addEventListener('pointerdown', (e) => {
         if (!loaded || revealed) return;
         scratching = true;
         last = null;
+        pointerType = e.pointerType || 'mouse';
         try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* unsupported */ }
         const p = _pos(e);
-        if (zonesFailed) { lastZoneId = null; _stroke(p, null); return; } // config unmatched: whole-surface
+        const pressure = (e.pressure > 0 && e.pressure < 1) ? e.pressure : 0;
+        if (zonesFailed) { lastZoneId = null; _enqueueSegment(p, null, pressure); _scheduleFlush(); return; } // config unmatched: whole-surface
         if (!zones) return; // zones still loading: wait rather than scratch the whole (unclipped) surface
         const zone = _zoneAt(p);
         lastZoneId = zone ? zone.id : null;
-        if (zone) _stroke(p, zone); // outside any zone: nothing scratches
+        if (zone) { _enqueueSegment(p, zone, pressure); _scheduleFlush(); } // outside any zone: nothing scratches
     });
     canvas.addEventListener('pointermove', (e) => {
         if (!scratching || revealed) return;
-        const p = _pos(e);
-        if (zonesFailed) { // config unmatched: whole-surface scratch
-            _stroke(p, null);
-            if (++moveCount % 10 === 0) _check();
-            return;
+        pointerType = e.pointerType || 'mouse';
+        // Coalesced events recover the sub-frame points the browser merged into this one, so fast drags
+        // stay continuous; each is stamped, with interpolation filling the gaps between them.
+        const events = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+        const evs = (events && events.length) ? events : [e];
+        for (const ce of evs) {
+            const p = _pos(ce);
+            const pressure = (ce.pressure > 0 && ce.pressure < 1) ? ce.pressure : 0;
+            if (zonesFailed) { _enqueueSegment(p, null, pressure); continue; } // config unmatched: whole-surface
+            if (!zones) return; // zones still loading
+            const zone = _zoneAt(p);
+            if (!zone) { last = null; lastZoneId = null; continue; } // between zones: don't scratch, break the line
+            if (zone.id !== lastZoneId) { last = null; lastZoneId = zone.id; } // entered a new zone: no bridging stroke
+            _enqueueSegment(p, zone, pressure);
         }
-        if (!zones) return; // zones still loading
-        const zone = _zoneAt(p);
-        if (!zone) { last = null; lastZoneId = null; return; } // between zones: don't scratch, break the line
-        if (zone.id !== lastZoneId) { last = null; lastZoneId = zone.id; } // entered a new zone: no bridging stroke
-        _stroke(p, zone);
-        if (++moveCount % 6 === 0) _check(zone);
+        _scheduleFlush();
     });
-    const end = () => { if (!scratching) return; scratching = false; last = null; lastZoneId = null; _check(); };
+    const end = () => { if (!scratching) return; scratching = false; last = null; lastZoneId = null; };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', () => { scratching = false; last = null; lastZoneId = null; });
     canvas.addEventListener('pointerleave', () => { scratching = false; last = null; lastZoneId = null; });
@@ -281,7 +457,7 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         revealAll() {
             if (revealed || !loaded) return;
             if (zones && zones.length) {
-                for (const z of zones) _revealZone(z); // the last zone fires onReveal
+                for (const z of zones) if (!revealedZones.has(z.id)) _completeZone(z); // last zone fires onReveal
             } else {
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.clearRect(0, 0, W, H);
@@ -292,10 +468,16 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         reset() {
             revealed = false;
             scratching = false;
-            moveCount = 0;
             last = null;
             lastZoneId = null;
+            pending = [];
+            flushScheduled = false;
+            fallbackDissolving = false;
             revealedZones.clear();
+            dissolving.clear();
+            if (zones) for (const z of zones) { if (z._grid) { z._grid.mark.fill(0); z._grid.count = 0; } }
+            fallbackGrid.mark.fill(0);
+            fallbackGrid.count = 0;
             paint(); // re-coat; the reveal-layer (numbers or seal tiles) stays as it was rendered
         },
     };
