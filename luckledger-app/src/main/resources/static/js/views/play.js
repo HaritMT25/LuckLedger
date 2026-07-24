@@ -284,7 +284,8 @@ async function renderScratch() {
     const revealAllBtn = document.getElementById('reveal-all');
     if (revealAllBtn) revealAllBtn.onclick = () => controller.revealAll();
 
-    attachTilt(document.getElementById('stage'));
+    // No tilt on the scratch stage: the 3D lean fights the scratching gesture — the card must sit
+    // still under the pointer. (attachTilt remains available for non-scratch cards.)
     startTwinkles(document.getElementById('stage'));
 }
 

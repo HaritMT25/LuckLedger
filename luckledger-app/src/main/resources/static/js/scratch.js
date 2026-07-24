@@ -32,8 +32,11 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
     const W = canvas.width;
     const H = canvas.height;
     // Drop willReadFrequently (there are no readbacks) so the canvas stays GPU-accelerated, and ask for
-    // a desynchronized surface for lower pointer-to-paint latency where the browser supports it.
-    const ctx = canvas.getContext('2d', { desynchronized: true });
+    // NOT desynchronized: a desynchronized canvas can be promoted to a hardware overlay while the
+    // pointer is down, and overlays do not alpha-blend with the DOM beneath — the erased areas
+    // render BLACK instead of showing the reveal layer until the pointer lifts. Correct compositing
+    // beats the small latency win here.
+    const ctx = canvas.getContext('2d');
     // Retina crispness: back the canvas with logical × DPR device pixels (capped at 2 so a 3x phone
     // doesn't quadruple fill cost), then scale the drawing matrix so every draw below can keep using
     // logical units. Resizing the canvas resets its context state, so the transform is set AFTER.
