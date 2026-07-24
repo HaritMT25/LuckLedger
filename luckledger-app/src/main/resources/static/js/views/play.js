@@ -267,8 +267,13 @@ async function renderScratch() {
         if (tile) tile.classList.add('revealed');
         const zone = zones.find((z) => z.id === e.detail.zoneId);
         if (zone) {
-            const cx = (zone.shape === 'circle' ? zone.cx : zone.x + zone.w / 2) * canvas.width;
-            const cy = (zone.shape === 'circle' ? zone.cy : zone.y + zone.h / 2) * canvas.height;
+            // Map the zone's fractional centre onto the FX layer's own pixel space. The scratch canvas's
+            // backing store is DPR-scaled by the engine, so its width/height are device pixels; the fx
+            // canvas stays at the logical 360×640 the burst draws into — use its dims (fall back to the
+            // scratch canvas if it is ever absent).
+            const fxc = document.getElementById('fx-canvas') || canvas;
+            const cx = (zone.shape === 'circle' ? zone.cx : zone.x + zone.w / 2) * fxc.width;
+            const cy = (zone.shape === 'circle' ? zone.cy : zone.y + zone.h / 2) * fxc.height;
             fx.burst(cx, cy);
         }
         const progress = document.getElementById('scratch-progress');
