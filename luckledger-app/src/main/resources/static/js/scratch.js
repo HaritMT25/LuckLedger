@@ -26,11 +26,14 @@
  *   once, reset() re-coats and allows scratching again
  */
 function initScratch(canvas, pngPath, onReveal = () => {}) {
-    // LOGICAL size: the canvas's authored width/height (play.js writes width="360" height="640", the
-    // e2e sweep and every fraction in scratch-zones.json are relative to these). Read them BEFORE we
-    // grow the backing store — from here on W/H are the only coordinate space this file speaks.
-    const W = canvas.width;
-    const H = canvas.height;
+    // LOGICAL size: the canvas's rendered CSS box, measured at init — NOT the authored width/height
+    // attributes. CSS decides how large the card actually displays; matching the logical space to it
+    // (1 logical unit == 1 CSS pixel) means the coating is never stretched, whatever size the stage
+    // takes. Zone geometry is fractional and the e2e sweeps the bounding box, so both are size-
+    // agnostic. Falls back to the authored attributes when the canvas isn't laid out yet (rect 0×0).
+    const rect = canvas.getBoundingClientRect();
+    const W = Math.round(rect.width) || canvas.width;
+    const H = Math.round(rect.height) || canvas.height;
     // Drop willReadFrequently (there are no readbacks) so the canvas stays GPU-accelerated, and ask for
     // NOT desynchronized: a desynchronized canvas can be promoted to a hardware overlay while the
     // pointer is down, and overlays do not alpha-blend with the DOM beneath — the erased areas
@@ -292,6 +295,9 @@ function initScratch(canvas, pngPath, onReveal = () => {}) {
         loaded = true;
         ctx.globalCompositeOperation = 'source-over';
         ctx.clearRect(0, 0, W, H);
+        // The art is 1080×1920; on a 1x display this is a ~3x downscale in one drawImage call, which
+        // looks mushy at the default smoothing. 'high' uses a proper multi-tap filter.
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, W, H);
     }
 
