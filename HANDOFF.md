@@ -110,7 +110,7 @@ default. See `SecurityConfig`.
 Migration `V007`, `CampaignService` + `CampaignController`. Operators create games from the dashboard
 with a live RTP preview, view per-game analytics, and drive lifecycle (activate / retire). Restock is
 campaign-aware (regenerates identical economics from the stored config). Frontend: campaign cards,
-create form, analytics route in `app.js`.
+create form, analytics route in `js/views/campaigns.js`.
 
 ### Validation + error mapping
 Bean validation on request DTOs; `GlobalExceptionHandler` maps domain/validation exceptions to a
@@ -126,7 +126,9 @@ to expose.
 
 `luckledger-app/src/main/resources/static/`:
 - `index.html`, `css/style.css`
-- `js/api.js` (REST wrapper + CSRF), `js/app.js` (SPA router + all views + scratch wiring),
+- `js/api.js` (REST wrapper + CSRF); the SPA is split into ordered classic scripts (no build step,
+  shared global scope): `js/core.js` (constants/state/helpers), `js/views/{shops,play,story,house,campaigns}.js`,
+  and `js/router.js` (routes + bootstrap, loaded LAST) — load order set in `index.html`,
   `js/scratch.js` (canvas scratch engine), `js/sounds.js` (pure WebAudio SFX)
 - `config/scratch-zones.json` — **presentation geometry only**: WHERE each scratchable panel sits on
   the ticket art (fractions of image w/h). The authoritative outcome is the backend mechanic grid.

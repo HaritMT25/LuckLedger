@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
  * equals the commitment that was fixed when the pool was printed.
  *
  * <p><strong>CANONICAL ENCODING (the single source of truth — mirrored byte-for-byte in
- * {@code app.js}'s {@code commitmentCanonical}):</strong>
+ * {@code js/views/play.js}'s {@code commitmentCanonical}):</strong>
  * <pre>{@code
  *   salt + "|" + rows + "x" + cols + "|" + symbols.join(",")
  * }</pre>

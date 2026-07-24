@@ -12,7 +12,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Locks the commit-reveal canonical encoding and hash byte-for-byte. The JS mirror in {@code app.js}
+ * Locks the commit-reveal canonical encoding and hash byte-for-byte. The JS mirror in {@code js/views/play.js}
  * must reproduce exactly the same strings and digest.
  */
 class GridCommitmentTest {

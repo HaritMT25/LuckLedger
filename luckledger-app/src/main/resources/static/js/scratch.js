@@ -5,7 +5,7 @@
  * currently inside (each stroke is clipped to that zone's circle/rect), so the spaces between zones,
  * the title, badges and the centre demon stay covered. Each zone tracks its own scratched fraction and
  * clears independently once ~70% of *its* coating is gone, uncovering the reveal layer beneath — the
- * ticket's real values (numbers or seal tiles), which app.js renders into #reveal-layer from the grid
+ * ticket's real values (numbers or seal tiles), which js/views/play.js renders into #reveal-layer from the grid
  * served by the API. When every zone has revealed, `onReveal` fires exactly once. If the zone config
  * can't be matched the engine falls back to the legacy whole-surface scratch so the card still works. */
 

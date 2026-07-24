@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  */
 class ScratchZoneContractTest {
 
-    /** Mirrors SEAL_ZONE_ORDER in static/js/app.js — update both together. */
+    /** Mirrors SEAL_ZONE_ORDER in static/js/core.js — update both together. */
     private static final List<String> SEAL_ZONE_ORDER = List.of(
             "seal-top", "seal-upper-right", "seal-lower-right", "seal-bottom", "seal-lower-left", "seal-upper-left");
 
